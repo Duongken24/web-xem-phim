@@ -1,0 +1,157 @@
+.niephim-video-shell {
+  --vjs-theme-red: #ef4444;
+  --vjs-theme-red-strong: #dc2626;
+  --vjs-panel-bg: linear-gradient(180deg, rgba(7, 10, 18, 0) 0%, rgba(7, 10, 18, 0.72) 42%, rgba(7, 10, 18, 0.96) 100%);
+}
+
+.niephim-video-js {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  font-family: inherit;
+}
+
+.niephim-video-js.video-js {
+  color: #fff;
+}
+
+.niephim-video-js .vjs-tech {
+  object-fit: contain;
+}
+
+.niephim-video-js .vjs-control-bar {
+  height: 4.25rem;
+  padding: 0 0.8rem 0.55rem;
+  background: var(--vjs-panel-bg);
+}
+
+.niephim-video-js .vjs-button > .vjs-icon-placeholder:before,
+.niephim-video-js .vjs-icon-fullscreen-enter:before,
+.niephim-video-js .vjs-icon-fullscreen-exit:before,
+.niephim-video-js .vjs-icon-play:before,
+.niephim-video-js .vjs-icon-pause:before,
+.niephim-video-js .vjs-icon-volume-high:before,
+.niephim-video-js .vjs-icon-volume-mute:before,
+.niephim-video-js .vjs-icon-picture-in-picture-enter:before,
+.niephim-video-js .vjs-icon-picture-in-picture-exit:before {
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.niephim-video-js .vjs-big-play-button {
+  top: 50%;
+  left: 50%;
+  width: 5rem;
+  height: 5rem;
+  margin-top: -2.5rem;
+  margin-left: -2.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.58);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.niephim-video-js .vjs-seek-backward-10,
+.niephim-video-js .vjs-seek-forward-10 {
+  width: 3rem;
+  min-width: 3rem;
+}
+
+.niephim-video-js .vjs-seek-button-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.niephim-video-js .vjs-seek-backward-10:hover .vjs-seek-button-label,
+.niephim-video-js .vjs-seek-forward-10:hover .vjs-seek-button-label,
+.niephim-video-js .vjs-seek-backward-10:focus .vjs-seek-button-label,
+.niephim-video-js .vjs-seek-forward-10:focus .vjs-seek-button-label {
+  color: #fca5a5;
+}
+
+.niephim-video-js:hover .vjs-big-play-button,
+.niephim-video-js .vjs-big-play-button:focus {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(220, 38, 38, 0.86);
+  transform: scale(1.04);
+}
+
+.niephim-video-js .vjs-play-progress,
+.niephim-video-js .vjs-volume-level {
+  background-color: var(--vjs-theme-red);
+}
+
+.niephim-video-js .vjs-load-progress div,
+.niephim-video-js .vjs-slider-bar {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+.niephim-video-js .vjs-progress-control .vjs-progress-holder,
+.niephim-video-js .vjs-volume-panel .vjs-volume-control .vjs-volume-bar {
+  height: 0.34rem;
+  border-radius: 9999px;
+}
+
+.niephim-video-js .vjs-play-progress:before {
+  color: #fff;
+}
+
+.niephim-video-js .vjs-menu-button-popup .vjs-menu {
+  left: auto;
+  right: 0;
+}
+
+.niephim-video-js .vjs-menu-content {
+  background: rgba(10, 13, 22, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.9rem;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+
+.niephim-video-js .vjs-menu li {
+  text-transform: none;
+}
+
+.niephim-video-js .vjs-menu li.vjs-selected,
+.niephim-video-js .vjs-menu li:focus,
+.niephim-video-js .vjs-menu li:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fff;
+}
+
+.niephim-video-js .vjs-time-control,
+.niephim-video-js .vjs-playback-rate .vjs-playback-rate-value,
+.niephim-video-js .vjs-remaining-time {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .niephim-video-js .vjs-control-bar {
+    height: 3.8rem;
+    padding-inline: 0.45rem;
+  }
+
+  .niephim-video-js .vjs-seek-backward-10,
+  .niephim-video-js .vjs-seek-forward-10 {
+    width: 2.6rem;
+    min-width: 2.6rem;
+  }
+
+  .niephim-video-js .vjs-seek-button-label {
+    font-size: 0.74rem;
+  }
+
+  .niephim-video-js .vjs-big-play-button {
+    width: 4.25rem;
+    height: 4.25rem;
+    margin-top: -2.125rem;
+    margin-left: -2.125rem;
+  }
+}

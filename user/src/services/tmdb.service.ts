@@ -1,186 +1,130 @@
 import type {
-  TMDBMovieDetail,
-  TMDBMoviesResponse,
+  TMDBBackdropSize,
   TMDBCredits,
-  TMDBVideosResponse,
-  TMDBSearchParams,
   TMDBDiscoverParams,
   TMDBGenre,
   TMDBImageSize,
-  TMDBBackdropSize,
+  TMDBMovieDetail,
+  TMDBMoviesResponse,
+  TMDBSearchParams,
+  TMDBVideosResponse,
 } from '../types/tmdb.types';
 
-// TMDB Configuration
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 const TMDB_BASE_URL = import.meta.env.VITE_TMDB_BASE_URL || 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE_URL = import.meta.env.VITE_TMDB_IMAGE_BASE_URL || 'https://image.tmdb.org/t/p';
-
-// Default language
 const DEFAULT_LANGUAGE = 'vi-VN';
 
-/**
- * Generic fetch function for TMDB API
- */
-async function tmdbFetch<T>(endpoint: string, params: Record<string, any> = {}): Promise<T> {
+const FALLBACK_IMAGES = {
+  poster: '/fallback-poster.svg',
+  backdrop: '/fallback-backdrop.svg',
+  profile: '/fallback-profile.svg',
+} as const;
+
+type TMDBImageKind = keyof typeof FALLBACK_IMAGES;
+type FetchParams = Record<string, string | number | boolean | null | undefined>;
+type TMDBFetchParams = TMDBSearchParams | TMDBDiscoverParams | FetchParams;
+
+async function tmdbFetch<T>(endpoint: string, params: TMDBFetchParams = {}): Promise<T> {
+  if (!TMDB_API_KEY) {
+    throw new Error('Missing VITE_TMDB_API_KEY in user/.env');
+  }
+
   const url = new URL(`${TMDB_BASE_URL}${endpoint}`);
+  const language = 'language' in params ? params.language : undefined;
+  url.searchParams.set('api_key', TMDB_API_KEY);
+  url.searchParams.set('language', String(language || DEFAULT_LANGUAGE));
 
-  // Add API key and default params
-  url.searchParams.append('api_key', TMDB_API_KEY);
-  url.searchParams.append('language', params.language || DEFAULT_LANGUAGE);
-
-  // Add other params
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && key !== 'language') {
-      url.searchParams.append(key, String(value));
+      url.searchParams.set(key, String(value));
     }
   });
 
-  try {
-    const response = await fetch(url.toString());
+  const response = await fetch(url.toString());
 
-    if (!response.ok) {
-      throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('TMDB API Error:', error);
-    throw error;
+  if (!response.ok) {
+    throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
   }
+
+  return response.json() as Promise<T>;
 }
 
-/**
- * Get full image URL from TMDB path
- */
+export function getTMDBFallbackImage(kind: TMDBImageKind = 'poster') {
+  return FALLBACK_IMAGES[kind];
+}
+
 export function getTMDBImageUrl(
   path: string | null,
-  size: TMDBImageSize | TMDBBackdropSize = 'original'
-): string {
-  if (!path) return '/placeholder-movie.jpg'; // Fallback image
+  size: TMDBImageSize | TMDBBackdropSize = 'original',
+  kind: TMDBImageKind = 'poster'
+) {
+  if (!path) return getTMDBFallbackImage(kind);
+  if (/^https?:\/\//i.test(path)) return path;
   return `${TMDB_IMAGE_BASE_URL}/${size}${path}`;
 }
 
-/**
- * Get YouTube video URL from TMDB video key
- */
-export function getYouTubeUrl(key: string): string {
+export function getYouTubeUrl(key: string) {
   return `https://www.youtube.com/watch?v=${key}`;
 }
 
-/**
- * Get YouTube embed URL
- */
-export function getYouTubeEmbedUrl(key: string): string {
+export function getYouTubeEmbedUrl(key: string) {
   return `https://www.youtube.com/embed/${key}`;
 }
 
-// ============================================
-// MOVIE ENDPOINTS
-// ============================================
-
-/**
- * Search movies by keyword
- */
-export async function searchMovies(params: TMDBSearchParams): Promise<TMDBMoviesResponse> {
+export function searchMovies(params: TMDBSearchParams): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/search/movie', params);
 }
 
-/**
- * Get movie details by TMDB ID
- */
-export async function getMovieDetails(movieId: number): Promise<TMDBMovieDetail> {
+export function getMovieDetails(movieId: number): Promise<TMDBMovieDetail> {
   return tmdbFetch<TMDBMovieDetail>(`/movie/${movieId}`);
 }
 
-/**
- * Get movie credits (cast & crew)
- */
-export async function getMovieCredits(movieId: number): Promise<TMDBCredits> {
+export function getMovieCredits(movieId: number): Promise<TMDBCredits> {
   return tmdbFetch<TMDBCredits>(`/movie/${movieId}/credits`);
 }
 
-/**
- * Get movie videos (trailers, teasers)
- */
-export async function getMovieVideos(movieId: number): Promise<TMDBVideosResponse> {
+export function getMovieVideos(movieId: number): Promise<TMDBVideosResponse> {
   return tmdbFetch<TMDBVideosResponse>(`/movie/${movieId}/videos`);
 }
 
-/**
- * Get movie recommendations
- */
-export async function getMovieRecommendations(movieId: number, page: number = 1): Promise<TMDBMoviesResponse> {
+export function getMovieRecommendations(movieId: number, page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>(`/movie/${movieId}/recommendations`, { page });
 }
 
-/**
- * Get similar movies
- */
-export async function getSimilarMovies(movieId: number, page: number = 1): Promise<TMDBMoviesResponse> {
+export function getSimilarMovies(movieId: number, page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>(`/movie/${movieId}/similar`, { page });
 }
 
-// ============================================
-// DISCOVER & BROWSE ENDPOINTS
-// ============================================
-
-/**
- * Discover movies with filters
- */
-export async function discoverMovies(params: TMDBDiscoverParams = {}): Promise<TMDBMoviesResponse> {
+export function discoverMovies(params: TMDBDiscoverParams = {}): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/discover/movie', params);
 }
 
-/**
- * Get popular movies
- */
-export async function getPopularMovies(page: number = 1): Promise<TMDBMoviesResponse> {
+export function getPopularMovies(page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/movie/popular', { page });
 }
 
-/**
- * Get top rated movies
- */
-export async function getTopRatedMovies(page: number = 1): Promise<TMDBMoviesResponse> {
+export function getTopRatedMovies(page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/movie/top_rated', { page });
 }
 
-/**
- * Get now playing movies
- */
-export async function getNowPlayingMovies(page: number = 1): Promise<TMDBMoviesResponse> {
+export function getNowPlayingMovies(page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/movie/now_playing', { page });
 }
 
-/**
- * Get upcoming movies
- */
-export async function getUpcomingMovies(page: number = 1): Promise<TMDBMoviesResponse> {
+export function getUpcomingMovies(page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>('/movie/upcoming', { page });
 }
 
-/**
- * Get trending movies (day/week)
- */
-export async function getTrendingMovies(timeWindow: 'day' | 'week' = 'week', page: number = 1): Promise<TMDBMoviesResponse> {
+export function getTrendingMovies(timeWindow: 'day' | 'week' = 'week', page = 1): Promise<TMDBMoviesResponse> {
   return tmdbFetch<TMDBMoviesResponse>(`/trending/movie/${timeWindow}`, { page });
 }
 
-// ============================================
-// GENRE ENDPOINTS
-// ============================================
-
-/**
- * Get all movie genres
- */
-export async function getMovieGenres(): Promise<{ genres: TMDBGenre[] }> {
+export function getMovieGenres(): Promise<{ genres: TMDBGenre[] }> {
   return tmdbFetch<{ genres: TMDBGenre[] }>('/genre/movie/list');
 }
 
-/**
- * Get movies by genre
- */
-export async function getMoviesByGenre(genreId: number, page: number = 1): Promise<TMDBMoviesResponse> {
+export function getMoviesByGenre(genreId: number, page = 1): Promise<TMDBMoviesResponse> {
   return discoverMovies({
     with_genres: String(genreId),
     page,
@@ -188,28 +132,24 @@ export async function getMoviesByGenre(genreId: number, page: number = 1): Promi
   });
 }
 
-// ============================================
-// UTILITY FUNCTIONS
-// ============================================
+export function getMoviesByYear(year: number, page = 1): Promise<TMDBMoviesResponse> {
+  return discoverMovies({
+    primary_release_year: year,
+    page,
+    sort_by: 'popularity.desc',
+  });
+}
 
-/**
- * Format release date to Vietnamese format
- */
-export function formatReleaseDate(dateString: string): string {
+export function formatReleaseDate(dateString: string) {
   if (!dateString) return 'Chưa công bố';
-
-  const date = new Date(dateString);
-  return date.toLocaleDateString('vi-VN', {
+  return new Date(dateString).toLocaleDateString('vi-VN', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
 }
 
-/**
- * Format runtime to hours and minutes
- */
-export function formatRuntime(minutes: number): string {
+export function formatRuntime(minutes: number) {
   if (!minutes) return 'N/A';
 
   const hours = Math.floor(minutes / 60);
@@ -221,72 +161,45 @@ export function formatRuntime(minutes: number): string {
   return `${hours} giờ ${mins} phút`;
 }
 
-/**
- * Get director from crew
- */
-export function getDirector(credits: TMDBCredits): string {
-  const director = credits.crew.find(member => member.job === 'Director');
+export function getDirector(credits: TMDBCredits) {
+  const director = credits.crew.find((member) => member.job === 'Director');
   return director ? director.name : 'N/A';
 }
 
-/**
- * Get main cast (first 10)
- */
-export function getMainCast(credits: TMDBCredits, limit: number = 10): TMDBCredits['cast'] {
+export function getMainCast(credits: TMDBCredits, limit = 10) {
   return credits.cast.slice(0, limit);
 }
 
-/**
- * Get trailer from videos
- */
-export function getTrailer(videos: TMDBVideosResponse): string | null {
-  const trailer = videos.results.find(
-    video => video.type === 'Trailer' && video.site === 'YouTube'
-  );
-
+export function getTrailer(videos: TMDBVideosResponse) {
+  const trailer = videos.results.find((video) => video.type === 'Trailer' && video.site === 'YouTube');
   return trailer ? getYouTubeEmbedUrl(trailer.key) : null;
 }
 
-/**
- * Convert TMDB rating to 10-point scale
- */
-export function formatRating(voteAverage: number): number {
+export function formatRating(voteAverage: number) {
   return Math.round(voteAverage * 10) / 10;
 }
 
-/**
- * Get age rating text
- */
-export function getAgeRatingText(adult: boolean): string {
+export function getAgeRatingText(adult: boolean) {
   return adult ? '18+' : 'PG-13';
 }
 
-// ============================================
-// EXPORT ALL
-// ============================================
-
 const TMDBService = {
-  // Search & Details
   searchMovies,
   getMovieDetails,
   getMovieCredits,
   getMovieVideos,
   getMovieRecommendations,
   getSimilarMovies,
-
-  // Discover & Browse
   discoverMovies,
   getPopularMovies,
   getTopRatedMovies,
   getNowPlayingMovies,
   getUpcomingMovies,
   getTrendingMovies,
-
-  // Genres
   getMovieGenres,
   getMoviesByGenre,
-
-  // Utilities
+  getMoviesByYear,
+  getTMDBFallbackImage,
   getTMDBImageUrl,
   getYouTubeUrl,
   getYouTubeEmbedUrl,

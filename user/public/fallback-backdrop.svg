@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <circle cx="1080" cy="120" r="160" fill="#7f1d1d" opacity="0.35"/>
+  <circle cx="180" cy="620" r="220" fill="#7c2d12" opacity="0.25"/>
+  <rect x="140" y="140" width="1000" height="440" rx="28" fill="none" stroke="#374151" stroke-width="6" stroke-dasharray="14 14"/>
+  <g fill="#9ca3af">
+    <rect x="500" y="250" width="280" height="160" rx="20" fill="#111827" stroke="#4b5563" stroke-width="6"/>
+    <circle cx="585" cy="305" r="28"/>
+    <path d="M535 390l75-78 68 56 58-44 78 66H535z"/>
+  </g>
+  <text x="640" y="490" text-anchor="middle" fill="#f9fafb" font-size="52" font-family="Arial, sans-serif" font-weight="700">THÈM PHIM</text>
+  <text x="640" y="550" text-anchor="middle" fill="#d1d5db" font-size="32" font-family="Arial, sans-serif">Backdrop khong co san</text>
+</svg>

@@ -1,30 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import TMDBService from '../services/tmdb.service';
 import type {
-  TMDBMovieDetail,
   TMDBCredits,
-  TMDBVideosResponse,
-  TMDBMoviesResponse,
   TMDBGenre,
+  TMDBMovieDetail,
+  TMDBMoviesResponse,
+  TMDBVideosResponse,
 } from '../types/tmdb.types';
 
-// ============================================
-// HOOK: useMovieSearch
-// ============================================
-export function useMovieSearch(query: string, enabled: boolean = true) {
+type DiscoverFilters = Record<string, string | number | boolean | null | undefined>;
+
+export function useMovieSearch(query: string, enabled = true, page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
-    if (!query || !enabled) return;
+    if (!query || !enabled) {
+      setData(null);
+      return;
+    }
 
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.searchMovies({ query, page: 1 });
-        setData(result);
+        setData(await TMDBService.searchMovies({ query, page }));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -32,16 +34,13 @@ export function useMovieSearch(query: string, enabled: boolean = true) {
       }
     };
 
-    const debounce = setTimeout(fetchData, 500); // Debounce 500ms
-    return () => clearTimeout(debounce);
-  }, [query, enabled]);
+    const debounce = window.setTimeout(fetchData, 500);
+    return () => window.clearTimeout(debounce);
+  }, [query, enabled, page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useMovieDetails
-// ============================================
 export function useMovieDetails(movieId: number | null) {
   const [movie, setMovie] = useState<TMDBMovieDetail | null>(null);
   const [credits, setCredits] = useState<TMDBCredits | null>(null);
@@ -50,7 +49,14 @@ export function useMovieDetails(movieId: number | null) {
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (!movieId) return;
+    if (!movieId) {
+      setMovie(null);
+      setCredits(null);
+      setVideos(null);
+      return;
+    }
+
+    let isMounted = true;
 
     const fetchData = async () => {
       try {
@@ -63,37 +69,40 @@ export function useMovieDetails(movieId: number | null) {
           TMDBService.getMovieVideos(movieId),
         ]);
 
+        if (!isMounted) return;
+
         setMovie(movieData);
         setCredits(creditsData);
         setVideos(videosData);
       } catch (err) {
-        setError(err as Error);
+        if (isMounted) setError(err as Error);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [movieId]);
 
   return { movie, credits, videos, loading, error };
 }
 
-// ============================================
-// HOOK: usePopularMovies
-// ============================================
-export function usePopularMovies(page: number = 1) {
+export function usePopularMovies(page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.getPopularMovies(page);
-        setData(result);
+        setData(await TMDBService.getPopularMovies(page));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -104,24 +113,21 @@ export function usePopularMovies(page: number = 1) {
     fetchData();
   }, [page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useTrendingMovies
-// ============================================
-export function useTrendingMovies(timeWindow: 'day' | 'week' = 'week', page: number = 1) {
+export function useTrendingMovies(timeWindow: 'day' | 'week' = 'week', page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.getTrendingMovies(timeWindow, page);
-        setData(result);
+        setData(await TMDBService.getTrendingMovies(timeWindow, page));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -132,24 +138,21 @@ export function useTrendingMovies(timeWindow: 'day' | 'week' = 'week', page: num
     fetchData();
   }, [timeWindow, page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useTopRatedMovies
-// ============================================
-export function useTopRatedMovies(page: number = 1) {
+export function useTopRatedMovies(page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.getTopRatedMovies(page);
-        setData(result);
+        setData(await TMDBService.getTopRatedMovies(page));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -160,12 +163,9 @@ export function useTopRatedMovies(page: number = 1) {
     fetchData();
   }, [page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useMovieGenres
-// ============================================
 export function useMovieGenres() {
   const [genres, setGenres] = useState<TMDBGenre[]>([]);
   const [loading, setLoading] = useState(false);
@@ -191,23 +191,23 @@ export function useMovieGenres() {
   return { genres, loading, error };
 }
 
-// ============================================
-// HOOK: useMoviesByGenre
-// ============================================
-export function useMoviesByGenre(genreId: number | null, page: number = 1) {
+export function useMoviesByGenre(genreId: number | null, page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
-    if (!genreId) return;
+    if (!genreId) {
+      setData(null);
+      return;
+    }
 
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.getMoviesByGenre(genreId, page);
-        setData(result);
+        setData(await TMDBService.getMoviesByGenre(genreId, page));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -218,24 +218,51 @@ export function useMoviesByGenre(genreId: number | null, page: number = 1) {
     fetchData();
   }, [genreId, page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useNowPlayingMovies
-// ============================================
-export function useNowPlayingMovies(page: number = 1) {
+export function useMoviesByYear(year: number | null, page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
+
+  useEffect(() => {
+    if (!year) {
+      setData(null);
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        setData(await TMDBService.getMoviesByYear(year, page));
+      } catch (err) {
+        setError(err as Error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [year, page]);
+
+  return { data, loading, error, movies };
+}
+
+export function useNowPlayingMovies(page = 1) {
+  const [data, setData] = useState<TMDBMoviesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.getNowPlayingMovies(page);
-        setData(result);
+        setData(await TMDBService.getNowPlayingMovies(page));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -246,24 +273,22 @@ export function useNowPlayingMovies(page: number = 1) {
     fetchData();
   }, [page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// HOOK: useDiscoverMovies (with filters)
-// ============================================
-export function useDiscoverMovies(filters: Record<string, any> = {}, page: number = 1) {
+export function useDiscoverMovies(filters: DiscoverFilters = {}, page = 1) {
   const [data, setData] = useState<TMDBMoviesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const movies = data?.results || [];
+  const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const result = await TMDBService.discoverMovies({ ...filters, page });
-        setData(result);
+        setData(await TMDBService.discoverMovies({ ...filters, page }));
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -272,14 +297,11 @@ export function useDiscoverMovies(filters: Record<string, any> = {}, page: numbe
     };
 
     fetchData();
-  }, [JSON.stringify(filters), page]);
+  }, [filtersKey, page]);
 
-  return { data, loading, error, movies: data?.results || [] };
+  return { data, loading, error, movies };
 }
 
-// ============================================
-// EXPORT ALL HOOKS
-// ============================================
 const useTMDB = {
   useMovieSearch,
   useMovieDetails,
@@ -288,6 +310,7 @@ const useTMDB = {
   useTopRatedMovies,
   useMovieGenres,
   useMoviesByGenre,
+  useMoviesByYear,
   useNowPlayingMovies,
   useDiscoverMovies,
 };

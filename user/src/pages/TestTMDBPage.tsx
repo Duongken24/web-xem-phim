@@ -78,9 +78,12 @@ const TestTMDBPage: React.FC = () => {
           {movies.map((movie) => (
             <div key={movie.id} className="bg-gray-900 rounded-lg overflow-hidden hover:scale-105 transition">
               <img
-                src={TMDBService.getTMDBImageUrl(movie.poster_path, 'w342')}
+                src={TMDBService.getTMDBImageUrl(movie.poster_path, 'w342', 'poster')}
                 alt={movie.title}
                 className="w-full aspect-[2/3] object-cover"
+                onError={(event) => {
+                  event.currentTarget.src = TMDBService.getTMDBFallbackImage('poster');
+                }}
               />
               <div className="p-3">
                 <h3 className="font-bold text-sm line-clamp-2 mb-1">{movie.title}</h3>

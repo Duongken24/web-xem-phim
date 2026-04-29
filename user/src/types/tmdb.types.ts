@@ -1,4 +1,4 @@
-// TMDB API Response Types
+// TMDB API response types used by the public movie catalog.
 
 export interface TMDBMovie {
   id: number;
@@ -122,7 +122,6 @@ export interface TMDBDiscoverParams {
   'vote_average.lte'?: number;
 }
 
-// Image size options
 export type TMDBImageSize =
   | 'w92'
   | 'w154'

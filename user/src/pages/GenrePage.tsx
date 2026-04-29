@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMoviesByGenre, useMovieGenres } from '../hooks/useTMDB';
 import TMDBService from '../services/tmdb.service';
+import CatalogService from '../services/catalog.service';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import MovieCard from '../components/movie/MovieCard';
 
@@ -10,9 +11,39 @@ const GenrePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const genreId = parseInt(id || '0');
   const [page, setPage] = useState(1);
+  const [internalMovieIdsByTmdb, setInternalMovieIdsByTmdb] = useState<Record<number, number>>({});
 
   const { genres } = useMovieGenres();
   const { movies, loading, error, data } = useMoviesByGenre(genreId, page);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadInternalMappings = async () => {
+      if (movies.length === 0) {
+        if (active) setInternalMovieIdsByTmdb({});
+        return;
+      }
+
+      const { movies: internalMovies } = await CatalogService.getAvailableMoviesByTmdbIds(movies.map((movie) => movie.id));
+      if (!active) return;
+
+      const nextMappings = internalMovies.reduce<Record<number, number>>((acc, movie) => {
+        if (typeof movie.tmdb_id === 'number' && Number.isInteger(movie.id) && movie.id > 0) {
+          acc[movie.tmdb_id] = movie.id;
+        }
+        return acc;
+      }, {});
+
+      setInternalMovieIdsByTmdb(nextMappings);
+    };
+
+    void loadInternalMappings();
+
+    return () => {
+      active = false;
+    };
+  }, [movies]);
 
   // Get genre name
   const genre = genres.find((g) => g.id === genreId);
@@ -77,10 +108,11 @@ const GenrePage: React.FC = () => {
 
         {/* Movies Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 mb-12">
-          {movies.map((movie) => (
+          {movies.map((movie, index) => (
             <MovieCard
               key={movie.id}
               id={movie.id}
+              internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
               title={movie.title}
               image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500')}
               quality="HD"
@@ -88,6 +120,11 @@ const GenrePage: React.FC = () => {
               rating={movie.vote_average}
               year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
               overview={movie.overview}
+              analytics={{
+                sourcePage: `/genre/${genreId}`,
+                sourceModule: 'genre_results',
+                rankPosition: (page - 1) * movies.length + index + 1,
+              }}
             />
           ))}
         </div>

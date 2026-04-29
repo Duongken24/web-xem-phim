@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="600" fill="url(#bg)"/>
+  <rect x="24" y="24" width="352" height="552" rx="24" fill="none" stroke="#374151" stroke-width="4" stroke-dasharray="10 10"/>
+  <g fill="#9ca3af">
+    <rect x="110" y="180" width="180" height="130" rx="16" fill="#1f2937" stroke="#4b5563" stroke-width="4"/>
+    <circle cx="165" cy="230" r="20"/>
+    <path d="M125 290l45-45 40 35 35-28 45 58H125z"/>
+  </g>
+  <text x="200" y="380" text-anchor="middle" fill="#f3f4f6" font-size="34" font-family="Arial, sans-serif" font-weight="700">THÈM PHIM</text>
+  <text x="200" y="425" text-anchor="middle" fill="#9ca3af" font-size="24" font-family="Arial, sans-serif">Poster khong co san</text>
+</svg>

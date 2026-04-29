@@ -19,18 +19,17 @@ export interface FilterState {
   year: string;
 }
 
-const Filter: React.FC<FilterProps> = ({ 
-  categories = [], 
-  countries = [], 
+const Filter: React.FC<FilterProps> = ({
+  categories = [],
+  countries = [],
   years = [],
-  onFilterChange 
+  onFilterChange,
 }) => {
   const [filters, setFilters] = useState<FilterState>({
     category: '',
     country: '',
-    year: ''
+    year: '',
   });
-
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
 
   const handleFilterChange = (type: keyof FilterState, value: string) => {
@@ -59,42 +58,39 @@ const Filter: React.FC<FilterProps> = ({
   const hasActiveFilters = filters.category || filters.country || filters.year;
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-white font-semibold">Lọc Phim</h3>
+    <div className="rounded-2xl border border-white/10 bg-gray-950/80 p-4 shadow-[0_12px_30px_rgba(0,0,0,0.2)]">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="font-semibold text-white">Lọc phim</h3>
         {hasActiveFilters && (
           <button
             onClick={clearAllFilters}
-            className="text-orange-500 hover:text-orange-400 text-sm flex items-center gap-1"
+            className="flex items-center gap-1 text-sm text-orange-500 hover:text-orange-400"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
             Xóa tất cả
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Category Filter */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="relative">
           <button
             onClick={() => toggleDropdown('category')}
-            className="w-full bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-between transition"
+            className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-white transition hover:border-white/20 hover:bg-gray-800"
           >
             <span className="text-sm">
-              {filters.category 
-                ? categories.find(c => c.id === filters.category)?.label 
-                : 'Thể Loại'}
+              {filters.category ? categories.find((c) => c.id === filters.category)?.label : 'Thể loại'}
             </span>
-            <ChevronDown className="w-4 h-4" />
+            <ChevronDown className="h-4 w-4" />
           </button>
 
           {openDropdown === 'category' && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+            <div className="absolute left-0 right-0 top-full z-10 mt-2 max-h-60 overflow-y-auto rounded-xl border border-white/10 bg-gray-900 shadow-lg">
               {categories.map((cat) => (
                 <button
                   key={cat.id}
                   onClick={() => handleFilterChange('category', cat.id)}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm transition"
+                  className="w-full px-4 py-2 text-left text-sm text-white transition hover:bg-gray-800"
                 >
                   {cat.label}
                 </button>
@@ -107,32 +103,29 @@ const Filter: React.FC<FilterProps> = ({
               onClick={() => clearFilter('category')}
               className="absolute right-10 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        {/* Country Filter */}
         <div className="relative">
           <button
             onClick={() => toggleDropdown('country')}
-            className="w-full bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-between transition"
+            className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-white transition hover:border-white/20 hover:bg-gray-800"
           >
             <span className="text-sm">
-              {filters.country 
-                ? countries.find(c => c.id === filters.country)?.label 
-                : 'Quốc Gia'}
+              {filters.country ? countries.find((c) => c.id === filters.country)?.label : 'Quốc gia'}
             </span>
-            <ChevronDown className="w-4 h-4" />
+            <ChevronDown className="h-4 w-4" />
           </button>
 
           {openDropdown === 'country' && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+            <div className="absolute left-0 right-0 top-full z-10 mt-2 max-h-60 overflow-y-auto rounded-xl border border-white/10 bg-gray-900 shadow-lg">
               {countries.map((country) => (
                 <button
                   key={country.id}
                   onClick={() => handleFilterChange('country', country.id)}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm transition"
+                  className="w-full px-4 py-2 text-left text-sm text-white transition hover:bg-gray-800"
                 >
                   {country.label}
                 </button>
@@ -145,32 +138,29 @@ const Filter: React.FC<FilterProps> = ({
               onClick={() => clearFilter('country')}
               className="absolute right-10 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
 
-        {/* Year Filter */}
         <div className="relative">
           <button
             onClick={() => toggleDropdown('year')}
-            className="w-full bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center justify-between transition"
+            className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-gray-900 px-4 py-3 text-white transition hover:border-white/20 hover:bg-gray-800"
           >
             <span className="text-sm">
-              {filters.year 
-                ? years.find(y => y.id === filters.year)?.label 
-                : 'Năm Phát Hành'}
+              {filters.year ? years.find((y) => y.id === filters.year)?.label : 'Năm phát hành'}
             </span>
-            <ChevronDown className="w-4 h-4" />
+            <ChevronDown className="h-4 w-4" />
           </button>
 
           {openDropdown === 'year' && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+            <div className="absolute left-0 right-0 top-full z-10 mt-2 max-h-60 overflow-y-auto rounded-xl border border-white/10 bg-gray-900 shadow-lg">
               {years.map((year) => (
                 <button
                   key={year.id}
                   onClick={() => handleFilterChange('year', year.id)}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-700 text-white text-sm transition"
+                  className="w-full px-4 py-2 text-left text-sm text-white transition hover:bg-gray-800"
                 >
                   {year.label}
                 </button>
@@ -183,7 +173,7 @@ const Filter: React.FC<FilterProps> = ({
               onClick={() => clearFilter('year')}
               className="absolute right-10 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>

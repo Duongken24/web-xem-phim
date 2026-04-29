@@ -2,14 +2,6 @@
  * Application Constants
  */
 
-// TMDB API Configuration
-export const TMDB_CONFIG = {
-  API_KEY: import.meta.env.VITE_TMDB_API_KEY,
-  BASE_URL: import.meta.env.VITE_TMDB_BASE_URL || 'https://api.themoviedb.org/3',
-  IMAGE_BASE_URL: import.meta.env.VITE_TMDB_IMAGE_BASE_URL || 'https://image.tmdb.org/t/p',
-  DEFAULT_LANGUAGE: 'vi-VN',
-};
-
 // Image Sizes
 export const IMAGE_SIZES = {
   POSTER: {
@@ -47,14 +39,14 @@ export const CACHE_CONFIG = {
   MAX_SIZE: 100, // Maximum cached items
 };
 
-// TMDB Rate Limits
+// Request rate limits
 export const RATE_LIMITS = {
   MAX_REQUESTS_PER_SECOND: 4,
   RETRY_DELAY: 1000, // 1 second
   MAX_RETRIES: 3,
 };
 
-// Movie Genres (TMDB IDs)
+// Movie genres lookup (legacy IDs)
 export const GENRES = {
   ACTION: 28,
   ADVENTURE: 12,
@@ -167,7 +159,6 @@ export const WATCH_THRESHOLDS = {
 };
 
 export default {
-  TMDB_CONFIG,
   IMAGE_SIZES,
   PAGINATION,
   CACHE_CONFIG,

@@ -21,11 +21,13 @@ build/
 # Environment variables (QUAN TRỌNG - chứa API keys!)
 # ===========================
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 *.env
+*.env.*
 user/.env
 backend/.env
 admin/.env
@@ -85,6 +87,21 @@ coverage/
 .eslintcache
 .stylelintcache
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+ENV/
+*/.venv/
+*/venv/
+*/env/
+
+# ===========================
+# AI local data/models
+# ===========================
+ai/data/
+ai/models/
 
 # ===========================
 # Misc
@@ -94,6 +111,15 @@ coverage/
 *.pid.lock
 .npm/
 .yarn/
+
+# ===========================
+# Local reports / planning docs
+# ===========================
+AI_RECOMMENDATION_REPORT.md
+SYSTEM_AUDIT_REPORT.md
+PHASE2_COMPLETE.md
+QUICK_START.md
+ROADMAP.md
 
 # ===========================
 # Supabase local (nếu có)

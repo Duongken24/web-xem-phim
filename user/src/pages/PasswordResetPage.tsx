@@ -31,51 +31,62 @@ export default function PasswordResetPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-gray-950">
+    <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="bg-gray-900 rounded-lg shadow-xl p-8">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <Link to="/" className="inline-flex items-center gap-2 hover:opacity-80 transition">
-              <div className="bg-orange-500 p-3 rounded-lg">
-                <Film className="w-8 h-8 text-white" />
+        <div className="rounded-lg bg-gray-900 p-8 shadow-xl">
+          <div className="mb-8 text-center">
+            <Link to="/" className="inline-flex items-center gap-2 transition hover:opacity-80">
+              <div className="rounded-lg bg-orange-500 p-3">
+                <Film className="h-8 w-8 text-white" />
               </div>
-              <span className="text-3xl font-bold text-orange-500">NiePhim</span>
+              <span className="text-3xl font-bold text-orange-500">Thêm Phim</span>
             </Link>
-            <h2 className="text-xl font-semibold text-white mt-6">Quên Mật Khẩu</h2>
-            <p className="text-gray-400 text-sm mt-2">
-              Nhập email để nhận link đặt lại mật khẩu
+            <h2 className="mt-6 text-xl font-semibold text-white">Quên mật khẩu</h2>
+            <p className="mt-2 text-sm text-gray-400">
+              Nhập email để nhận link đặt lại mật khẩu.
             </p>
           </div>
 
           {success ? (
             <div className="text-center">
               <div className="mb-4">
-                <svg className="w-16 h-16 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="mx-auto h-16 w-16 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-white mb-2">Email đã được gửi!</h3>
-              <p className="text-gray-400 text-sm mb-6">
+              <h3 className="mb-2 text-lg font-semibold text-white">Email đã được gửi!</h3>
+              <p className="mb-6 text-sm text-gray-400">
                 Vui lòng kiểm tra email <strong className="text-white">{email}</strong> để nhận link đặt lại mật khẩu.
               </p>
-              <Link
-                to="/login"
-                className="inline-block px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-lg transition text-white font-semibold"
-              >
-                Quay lại Đăng nhập
-              </Link>
+              <div className="flex flex-col gap-3">
+                <Link
+                  to="/login"
+                  className="inline-block rounded-lg bg-orange-500 px-6 py-2 font-semibold text-white transition hover:bg-orange-600"
+                >
+                  Quay lại đăng nhập
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSuccess(false);
+                    setEmail('');
+                  }}
+                  className="text-sm text-gray-400 transition hover:text-white"
+                >
+                  Gửi cho email khác
+                </button>
+              </div>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
               {error && (
-                <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded-lg text-sm">
+                <div className="rounded-lg border border-red-500 bg-red-500/10 px-4 py-3 text-sm text-red-500">
                   {error}
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="mb-2 block text-sm font-medium text-gray-300">
                   Email
                 </label>
                 <input
@@ -83,7 +94,7 @@ export default function PasswordResetPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition"
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 text-white transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="email@example.com"
                   disabled={loading}
                 />
@@ -92,7 +103,7 @@ export default function PasswordResetPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                className="flex w-full items-center justify-center rounded-lg bg-red-600 px-6 py-3 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? (
                   <>
@@ -100,13 +111,13 @@ export default function PasswordResetPage() {
                     <span className="ml-2">Đang gửi...</span>
                   </>
                 ) : (
-                  'Gửi Link Đặt Lại Mật Khẩu'
+                  'Gửi link đặt lại mật khẩu'
                 )}
               </button>
 
               <div className="text-center text-sm">
-                <Link to="/login" className="text-gray-400 hover:text-white transition">
-                  ← Quay lại Đăng nhập
+                <Link to="/login" className="text-gray-400 transition hover:text-white">
+                  ← Quay lại đăng nhập
                 </Link>
               </div>
             </form>

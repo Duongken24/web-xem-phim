@@ -1,8 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Film } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+
+type FromLocationState =
+  | {
+      pathname?: string;
+      search?: string;
+      hash?: string;
+    }
+  | string
+  | undefined;
 
 const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -10,11 +19,26 @@ const LoginPage: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { signIn } = useAuth();
+  const { signIn, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as any)?.from?.pathname || '/';
+  const fromState = ((location.state as { from?: FromLocationState } | null)?.from ?? '/') as FromLocationState;
+  const from = useMemo(() => {
+    if (typeof fromState === 'string') return fromState || '/';
+    if (fromState?.pathname) {
+      return `${fromState.pathname}${fromState.search ?? ''}${fromState.hash ?? ''}`;
+    }
+    return '/';
+  }, [fromState]);
+
+  const redirectedFromWatch = from.startsWith('/watch');
+
+  useEffect(() => {
+    if (isAdmin) {
+      navigate('/admin', { replace: true });
+    }
+  }, [isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,35 +48,43 @@ const LoginPage: React.FC = () => {
     const result = await signIn(email, password);
 
     if (result.success) {
-      navigate(from, { replace: true });
+      const role = result.user?.role || result.user?.user_metadata?.role;
+
+      if (role === 'admin' || isAdmin) {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate(from, { replace: true });
+      }
     } else {
-      setError(result.error || 'Đăng nhập thất bại');
+      setError(result.error || 'Đăng nhập thất bại.');
     }
 
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 hover:opacity-80 transition">
-            <div className="bg-orange-500 p-3 rounded-lg">
-              <Film className="w-8 h-8 text-white" />
+    <div className="flex min-h-screen items-center justify-center bg-gray-950 px-4 py-12">
+      <div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <Link to="/" className="inline-flex items-center gap-2 transition hover:opacity-80">
+            <div className="rounded-lg bg-orange-500 p-3">
+              <Film className="h-8 w-8 text-white" />
             </div>
-            <span className="text-3xl font-bold text-orange-500">NiePhim</span>
+            <span className="text-3xl font-bold text-orange-500">Thêm Phim</span>
           </Link>
-          <h1 className="text-2xl font-bold text-white mt-6">Đăng nhập</h1>
-          <p className="text-gray-400 mt-2">Chào mừng bạn quay trở lại</p>
+          <h1 className="mt-6 text-2xl font-bold text-white">Đăng nhập</h1>
+          <p className="mt-2 text-gray-400">Chào mừng bạn quay trở lại.</p>
+          {redirectedFromWatch && (
+            <p className="mt-3 rounded-lg border border-orange-500/20 bg-orange-500/10 px-4 py-3 text-sm text-orange-200">
+              Đăng nhập để tiếp tục xem phim bạn vừa chọn.
+            </p>
+          )}
         </div>
 
-        {/* Form */}
-        <div className="bg-gray-900 rounded-lg p-8 shadow-xl">
+        <div className="rounded-lg bg-gray-900 p-8 shadow-xl">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Email */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-300 mb-2">
+              <label htmlFor="email" className="mb-2 block text-sm font-medium text-gray-300">
                 Email
               </label>
               <input
@@ -61,15 +93,14 @@ const LoginPage: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-orange-500"
                 placeholder="your@email.com"
                 disabled={loading}
               />
             </div>
 
-            {/* Password */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-300 mb-2">
+              <label htmlFor="password" className="mb-2 block text-sm font-medium text-gray-300">
                 Mật khẩu
               </label>
               <input
@@ -78,34 +109,31 @@ const LoginPage: React.FC = () => {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-3 text-white placeholder-gray-500 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-orange-500"
                 placeholder="••••••••"
                 disabled={loading}
               />
             </div>
 
-            {/* Error Message */}
             {error && (
-              <div className="bg-red-500/10 border border-red-500 rounded-lg p-3">
-                <p className="text-red-500 text-sm">{error}</p>
+              <div className="rounded-lg border border-red-500 bg-red-500/10 p-3">
+                <p className="text-sm text-red-500">{error}</p>
               </div>
             )}
 
-            {/* Forgot Password Link */}
             <div className="flex justify-end">
               <Link
                 to="/forgot-password"
-                className="text-sm text-gray-400 hover:text-orange-500 transition"
+                className="text-sm text-gray-400 transition hover:text-orange-500"
               >
                 Quên mật khẩu?
               </Link>
             </div>
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              className="flex w-full items-center justify-center rounded-lg bg-red-600 py-3 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
                 <>
@@ -118,20 +146,18 @@ const LoginPage: React.FC = () => {
             </button>
           </form>
 
-          {/* Register Link */}
           <div className="mt-6 text-center">
             <p className="text-gray-400">
               Chưa có tài khoản?{' '}
-              <Link to="/register" className="text-blue-500 hover:text-blue-400 hover:underline transition">
+              <Link to="/register" className="text-blue-500 transition hover:text-blue-400 hover:underline">
                 Đăng ký ngay
               </Link>
             </p>
           </div>
         </div>
 
-        {/* Back to Home */}
         <div className="mt-6 text-center">
-          <Link to="/" className="text-gray-400 hover:text-white transition">
+          <Link to="/" className="text-gray-400 transition hover:text-white">
             ← Quay về trang chủ
           </Link>
         </div>

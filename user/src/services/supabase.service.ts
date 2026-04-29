@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase';
 
 /**
  * Supabase Service - User Data Operations
- * Architecture: Only store movie_id (TMDB ID), fetch metadata from TMDB real-time
+ * Architecture: Only store movie_id, fetch metadata from the internal catalog service at runtime
  */
 
 // ============================================
@@ -12,7 +12,7 @@ import { supabase } from '../lib/supabase';
 export interface WatchlistItem {
   id: number;
   user_id: string;
-  movie_id: number; // TMDB movie ID
+  movie_id: number; // Legacy metadata movie ID
   created_at: string;
 }
 
@@ -20,8 +20,6 @@ export interface WatchlistItem {
  * Add movie to user's watchlist
  */
 export async function addToWatchlist(userId: string, movieId: number): Promise<{ success: boolean; error?: string }> {
-  console.log('SupabaseService.addToWatchlist - Starting:', { userId, movieId });
-
   try {
     // First check if already exists to avoid duplicate errors
     const { data: existing } = await supabase
@@ -29,14 +27,13 @@ export async function addToWatchlist(userId: string, movieId: number): Promise<{
       .select('id')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .single();
+      .maybeSingle();
 
     if (existing) {
-      console.log('SupabaseService.addToWatchlist - Already exists:', existing);
       return { success: true }; // Already in watchlist
     }
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('favorites')
       .insert({
         user_id: userId,
@@ -46,14 +43,11 @@ export async function addToWatchlist(userId: string, movieId: number): Promise<{
       .single();
 
     if (error) {
-      console.error('SupabaseService.addToWatchlist - Insert error:', error);
       return { success: false, error: error.message };
     }
 
-    console.log('SupabaseService.addToWatchlist - Success:', data);
     return { success: true };
   } catch (error: any) {
-    console.error('SupabaseService.addToWatchlist - Exception:', error);
     return { success: false, error: error.message };
   }
 }
@@ -70,13 +64,11 @@ export async function removeFromWatchlist(userId: string, movieId: number): Prom
       .eq('movie_id', movieId);
 
     if (error) {
-      console.error('Error removing from watchlist:', error);
       return { success: false, error: error.message };
     }
 
     return { success: true };
   } catch (error: any) {
-    console.error('Error removing from watchlist:', error);
     return { success: false, error: error.message };
   }
 }
@@ -85,8 +77,6 @@ export async function removeFromWatchlist(userId: string, movieId: number): Prom
  * Get user's watchlist (returns only movie_ids)
  */
 export async function getWatchlist(userId: string): Promise<{ movieIds: number[]; error?: string }> {
-  console.log('SupabaseService.getWatchlist - Starting for user:', userId);
-
   try {
     const { data, error } = await supabase
       .from('favorites')
@@ -94,18 +84,13 @@ export async function getWatchlist(userId: string): Promise<{ movieIds: number[]
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    console.log('SupabaseService.getWatchlist - Raw response:', { data, error });
-
     if (error) {
-      console.error('SupabaseService.getWatchlist - Error:', error);
       return { movieIds: [], error: error.message };
     }
 
     const movieIds = data?.map(item => item.movie_id) || [];
-    console.log('SupabaseService.getWatchlist - Parsed movieIds:', movieIds);
     return { movieIds };
   } catch (error: any) {
-    console.error('SupabaseService.getWatchlist - Exception:', error);
     return { movieIds: [], error: error.message };
   }
 }
@@ -120,16 +105,14 @@ export async function isInWatchlist(userId: string, movieId: number): Promise<bo
       .select('id')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .single();
+      .maybeSingle();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('Error checking watchlist:', error);
       return false;
     }
 
     return !!data;
-  } catch (error) {
-    console.error('Error checking watchlist:', error);
+  } catch {
     return false;
   }
 }
@@ -162,17 +145,28 @@ export async function addToHistory(
   try {
     const progress = duration > 0 ? Math.round((watchPosition / duration) * 100) : 0;
 
-    // Check if history exists
-    const { data: existing } = await supabase
+    // Find the latest existing record for this user/movie/episode combination.
+    // We intentionally avoid `.single()` here because duplicate rows may already exist.
+    let existingQuery = supabase
       .from('watch_history')
       .select('id')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .eq('episode_id', episodeId || null)
-      .single();
+      .order('last_watched_at', { ascending: false })
+      .limit(1);
+
+    existingQuery = episodeId ? existingQuery.eq('episode_id', episodeId) : existingQuery.is('episode_id', null);
+
+    const { data: existingRows, error: existingError } = await existingQuery;
+
+    if (existingError) {
+      return { success: false, error: existingError.message };
+    }
+
+    const existing = existingRows?.[0];
 
     if (existing) {
-      // Update existing
+      // Update the latest record instead of creating a new one
       const { error } = await supabase
         .from('watch_history')
         .update({
@@ -207,7 +201,6 @@ export async function addToHistory(
 
     return { success: true };
   } catch (error: any) {
-    console.error('Error adding to history:', error);
     return { success: false, error: error.message };
   }
 }
@@ -216,25 +209,40 @@ export async function addToHistory(
  * Get user's watch history (returns movie_ids with progress)
  */
 export async function getWatchHistory(userId: string, limit: number = 20): Promise<{
-  items: Array<{ movie_id: number; progress: number; last_watched_at: string }>;
+  items: Array<{
+    movie_id: number;
+    episode_id?: number | null;
+    progress: number;
+    watch_position: number;
+    duration: number;
+    last_watched_at: string;
+  }>;
   error?: string;
 }> {
   try {
     const { data, error } = await supabase
       .from('watch_history')
-      .select('movie_id, progress, last_watched_at')
+      .select('movie_id, episode_id, progress, watch_position, duration, last_watched_at')
       .eq('user_id', userId)
       .order('last_watched_at', { ascending: false })
-      .limit(limit);
+      .limit(Math.max(limit * 5, limit));
 
     if (error) {
-      console.error('Error fetching watch history:', error);
       return { items: [], error: error.message };
     }
 
-    return { items: data || [] };
+    // Keep only the latest record for each movie_id so HistoryPage and Continue Watching
+    // never render duplicate rows for the same movie.
+    const uniqueItems = new Map<number, (typeof data)[number]>();
+
+    for (const item of data || []) {
+      if (!uniqueItems.has(item.movie_id)) {
+        uniqueItems.set(item.movie_id, item);
+      }
+    }
+
+    return { items: Array.from(uniqueItems.values()).slice(0, limit) };
   } catch (error: any) {
-    console.error('Error fetching watch history:', error);
     return { items: [], error: error.message };
   }
 }
@@ -242,31 +250,36 @@ export async function getWatchHistory(userId: string, limit: number = 20): Promi
 /**
  * Get watch progress for a specific movie
  */
-export async function getWatchProgress(userId: string, movieId: number): Promise<{
+export async function getWatchProgress(userId: string, movieId: number, episodeId?: number): Promise<{
   watchPosition: number;
   progress: number;
   duration: number;
 } | null> {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('watch_history')
       .select('watch_position, progress, duration')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .single();
+      .order('last_watched_at', { ascending: false })
+      .limit(1);
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching watch progress:', error);
+    query = episodeId ? query.eq('episode_id', episodeId) : query.is('episode_id', null);
+
+    const { data, error } = await query;
+
+    if (error) {
       return null;
     }
 
-    return data ? {
-      watchPosition: data.watch_position,
-      progress: data.progress,
-      duration: data.duration,
+    const latest = data?.[0];
+
+    return latest ? {
+      watchPosition: latest.watch_position,
+      progress: latest.progress,
+      duration: latest.duration,
     } : null;
-  } catch (error) {
-    console.error('Error fetching watch progress:', error);
+  } catch {
     return null;
   }
 }
@@ -295,13 +308,21 @@ export async function addRating(
   review?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Check if rating exists
-    const { data: existing } = await supabase
+    // Find the latest existing rating instead of using `.single()` so old duplicate data
+    // cannot force a new duplicate row.
+    const { data: existingRows, error: existingError } = await supabase
       .from('ratings')
       .select('id')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .single();
+      .order('id', { ascending: false })
+      .limit(1);
+
+    if (existingError) {
+      return { success: false, error: existingError.message };
+    }
+
+    const existing = existingRows?.[0];
 
     if (existing) {
       // Update existing
@@ -335,7 +356,6 @@ export async function addRating(
 
     return { success: true };
   } catch (error: any) {
-    console.error('Error adding rating:', error);
     return { success: false, error: error.message };
   }
 }
@@ -350,16 +370,15 @@ export async function getUserRating(userId: string, movieId: number): Promise<Ra
       .select('*')
       .eq('user_id', userId)
       .eq('movie_id', movieId)
-      .single();
+      .order('id', { ascending: false })
+      .limit(1);
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching rating:', error);
+    if (error) {
       return null;
     }
 
-    return data;
-  } catch (error) {
-    console.error('Error fetching rating:', error);
+    return data?.[0] || null;
+  } catch {
     return null;
   }
 }
@@ -376,14 +395,105 @@ export async function getMovieRatings(movieId: number): Promise<{ ratings: Ratin
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Error fetching movie ratings:', error);
       return { ratings: [], error: error.message };
     }
 
     return { ratings: data || [] };
   } catch (error: any) {
-    console.error('Error fetching movie ratings:', error);
     return { ratings: [], error: error.message };
+  }
+}
+
+// ============================================
+// COMMENT OPERATIONS
+// ============================================
+
+export interface Comment {
+  id: number;
+  user_id: string;
+  movie_id: number;
+  author_name: string | null;
+  content: string;
+  created_at: string;
+}
+
+/**
+ * Get all comments for a movie
+ */
+export async function getMovieComments(movieId: number): Promise<{ comments: Comment[]; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('movie_id', movieId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return { comments: [], error: error.message };
+    }
+
+    const comments =
+      data?.map((item) => ({
+        id: item.id,
+        user_id: item.user_id,
+        movie_id: item.movie_id,
+        author_name: item.author_name ?? null,
+        content: item.content,
+        created_at: item.created_at,
+      })) || [];
+
+    return { comments };
+  } catch (error: any) {
+    return { comments: [], error: error.message };
+  }
+}
+
+/**
+ * Add a comment for a movie
+ */
+export async function addComment(
+  userId: string,
+  movieId: number,
+  content: string,
+  authorName?: string
+): Promise<{ success: boolean; comment?: Comment; error?: string }> {
+  try {
+    const normalizedContent = content.trim();
+
+    if (!normalizedContent) {
+      return { success: false, error: 'Nội dung bình luận không được để trống.' };
+    }
+
+    const { data, error } = await supabase
+      .from('comments')
+      .insert({
+        user_id: userId,
+        movie_id: movieId,
+        author_name: authorName?.trim() || null,
+        content: normalizedContent,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      comment: data
+        ? {
+            id: data.id,
+            user_id: data.user_id,
+            movie_id: data.movie_id,
+            author_name: data.author_name ?? null,
+            content: data.content,
+            created_at: data.created_at,
+          }
+        : undefined,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
   }
 }
 
@@ -407,6 +517,10 @@ const SupabaseService = {
   addRating,
   getUserRating,
   getMovieRatings,
+
+  // Comments
+  getMovieComments,
+  addComment,
 };
 
 export default SupabaseService;

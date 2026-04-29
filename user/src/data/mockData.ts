@@ -12,7 +12,7 @@ export interface Movie {
 }
 
 export interface SlideData {
-  id: number;
+  id: string | number;
   title: string;
   description: string;
   image: string;

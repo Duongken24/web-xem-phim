@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="450" fill="url(#bg)"/>
+  <circle cx="150" cy="150" r="64" fill="#4b5563"/>
+  <path d="M72 360c12-68 54-102 78-102s66 34 78 102" fill="#4b5563"/>
+  <text x="150" y="410" text-anchor="middle" fill="#d1d5db" font-size="22" font-family="Arial, sans-serif">Khong co anh</text>
+</svg>
