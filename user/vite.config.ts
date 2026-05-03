@@ -2,23 +2,29 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: false,
+      includeAssets: [
+        'icons/icon-192x192.png',
+        'icons/icon-512x512.png',
+        'icons/icon-512x512-maskable.png',
+      ],
       manifest: {
-        name: 'Thèm Phim - Ứng dụng xem phim',
-        short_name: 'Thèm Phim',
-        description: 'Ứng dụng web xem phim trực tuyến hỗ trợ cài đặt trên thiết bị di động.',
+        name: 'Thêm Phim - Ứng dụng xem phim',
+        short_name: 'Thêm Phim',
+        description: 'Ứng dụng xem phim trực tuyến có thể cài đặt trên điện thoại và máy tính bảng.',
+        theme_color: '#0f172a',
+        background_color: '#020617',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
         scope: '/',
         lang: 'vi',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        categories: ['entertainment', 'video'],
         icons: [
           {
             src: '/icons/icon-192x192.png',
@@ -39,9 +45,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp}'],
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
         globIgnores: ['**/*.{mp4,m3u8,ts}'],
-        navigateFallbackDenylist: [/^\/api\/stream\//],
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: ({ url }) =>
@@ -72,6 +81,7 @@ export default defineConfig({
               cacheName: 'movies-api-cache',
               networkTimeoutSeconds: 5,
               expiration: {
+                maxEntries: 30,
                 maxAgeSeconds: 60 * 60,
               },
               cacheableResponse: {
@@ -80,6 +90,11 @@ export default defineConfig({
             },
           },
         ],
+      },
+      devOptions: {
+        enabled: true,
+        suppressWarnings: true,
+        type: 'module',
       },
     }),
   ],

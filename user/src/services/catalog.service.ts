@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import type { TMDBMovieDetail } from '../types/tmdb.types';
+import type { TMDBMovie, TMDBMovieDetail, TMDBMoviesResponse } from '../types/tmdb.types';
 import { getApiBaseUrl } from './api';
 
 export interface CatalogMovie {
@@ -17,11 +17,13 @@ export interface CatalogMovie {
   runtime_minutes: number | null;
   vote_average: number | null;
   vote_count: number | null;
+  type?: string | null;
   video_url: string | null;
   stream_url: string | null;
   status: string | null;
   is_active: boolean | null;
   is_featured: boolean | null;
+  is_trending?: boolean | null;
   is_premium: boolean | null;
   has_play_source: boolean;
 }
@@ -104,11 +106,13 @@ function mapMovie(row: any): CatalogMovie {
     runtime_minutes: row.runtime_minutes ?? null,
     vote_average: row.vote_average === null || row.vote_average === undefined ? null : Number(row.vote_average),
     vote_count: row.vote_count ?? null,
+    type: row.type ?? null,
     video_url: row.video_url ?? null,
     stream_url: row.stream_url ?? null,
     status: row.status ?? null,
     is_active: row.is_active ?? null,
     is_featured: row.is_featured ?? null,
+    is_trending: row.is_trending ?? null,
     is_premium: row.is_premium ?? null,
     has_play_source:
       row.has_play_source ??
@@ -179,6 +183,61 @@ function tmdbPayload(movie: TMDBMovieDetail, includeDefaults = false) {
   };
 }
 
+
+function normalizeCatalogSearchText(value: unknown) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function scoreCatalogMovieForSearch(movie: CatalogMovie, normalizedQuery: string, queryTokens: string[]) {
+  const title = normalizeCatalogSearchText(movie.title);
+  const originalTitle = normalizeCatalogSearchText(movie.original_title);
+  const overview = normalizeCatalogSearchText(movie.overview);
+
+  let score = 0;
+
+  if (title === normalizedQuery || originalTitle === normalizedQuery) score += 120;
+  if (title.startsWith(normalizedQuery) || originalTitle.startsWith(normalizedQuery)) score += 80;
+  if (title.includes(normalizedQuery) || originalTitle.includes(normalizedQuery)) score += 50;
+  if (overview.includes(normalizedQuery)) score += 18;
+
+  const tokenMatches = queryTokens.filter(
+    (token) =>
+      title.includes(token) ||
+      originalTitle.includes(token) ||
+      overview.includes(token)
+  ).length;
+
+  score += tokenMatches * 9;
+
+  if (movie.vote_average && movie.vote_average >= 7) score += 4;
+  if (movie.has_play_source) score += 3;
+
+  return score;
+}
+
+function mapCatalogMovieToTmdbMovie(movie: CatalogMovie): TMDBMovie {
+  return {
+    id: movie.tmdb_id || movie.id,
+    title: movie.title,
+    original_title: movie.original_title || movie.title,
+    overview: movie.overview || '',
+    poster_path: movie.poster_url || movie.poster_path,
+    backdrop_path: movie.backdrop_url || movie.backdrop_path,
+    release_date: movie.release_date || (movie.release_year ? `${movie.release_year}-01-01` : ''),
+    genre_ids: [],
+    adult: false,
+    original_language: 'vi',
+    popularity: 0,
+    vote_average: movie.vote_average || 0,
+    vote_count: movie.vote_count || 0,
+    video: false,
+  };
+}
+
 function getApiUrl() {
   return getApiBaseUrl();
 }
@@ -237,23 +296,39 @@ export async function getMovieByInternalId(movieId: number): Promise<{ movie: Ca
 export async function getMoviesByInternalIds(movieIds: number[]): Promise<CatalogMovie[]> {
   if (movieIds.length === 0) return [];
 
-  const normalizedIds = movieIds
-    .map(asNumber)
-    .filter((id): id is number => id !== null);
+  const normalizedIds = Array.from(
+    new Set(movieIds.map(asNumber).filter((id): id is number => id !== null))
+  );
 
   if (normalizedIds.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('movies')
-    .select('*')
-    .in('id', normalizedIds);
+  try {
+    const [{ data: availableMovies }, { data: internalMovies }] = await Promise.all([
+      supabase.from('available_movies').select('*').in('id', normalizedIds),
+      supabase.from('movies').select('*').in('id', normalizedIds),
+    ]);
 
-  if (error || !data) return [];
+    const availableById = new Map<number, any>(
+      (availableMovies || [])
+        .map((row) => [Number(row.id), row] as const)
+        .filter(([id]) => Number.isInteger(id) && id > 0)
+    );
+    const internalById = new Map<number, any>(
+      (internalMovies || [])
+        .map((row) => [Number(row.id), row] as const)
+        .filter(([id]) => Number.isInteger(id) && id > 0)
+    );
 
-  const order = new Map(normalizedIds.map((id, index) => [id, index]));
-  return data
-    .map(mapMovie)
-    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    const order = new Map(normalizedIds.map((id, index) => [id, index]));
+
+    return normalizedIds
+      .map((id) => mergeCatalogMovieRows(availableById.get(id), internalById.get(id)))
+      .filter(Boolean)
+      .map(mapMovie)
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  } catch {
+    return [];
+  }
 }
 
 export async function getAvailableMoviesByTmdbIds(
@@ -302,6 +377,83 @@ export async function getAvailableMoviesByTmdbIds(
   }
 }
 
+
+export async function searchCatalogMovies(
+  query: string,
+  page = 1,
+  limit = 24
+): Promise<{ data: TMDBMoviesResponse; error?: string }> {
+  const normalizedQuery = normalizeCatalogSearchText(query);
+  const safePage = Math.max(1, Math.floor(page) || 1);
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 48);
+
+  if (!normalizedQuery) {
+    return {
+      data: {
+        page: safePage,
+        results: [],
+        total_pages: 1,
+        total_results: 0,
+      },
+    };
+  }
+
+  try {
+    const response = await fetch(`${getApiUrl()}/api/movies`);
+    const payload = await readApiJson(response);
+
+    if (!response.ok || !payload.success) {
+      return {
+        data: {
+          page: safePage,
+          results: [],
+          total_pages: 1,
+          total_results: 0,
+        },
+        error: payload.error || 'Khong the tim phim trong thu vien noi bo.',
+      };
+    }
+
+    const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    const rankedMovies = (payload.movies || [])
+      .map(mapMovie)
+      .filter((movie: CatalogMovie) => movie.is_active !== false && (movie.status || 'active') === 'active')
+      .map((movie: CatalogMovie) => ({
+        movie,
+        score: scoreCatalogMovieForSearch(movie, normalizedQuery, queryTokens),
+      }))
+      .filter((item: { movie: CatalogMovie; score: number }) => item.score > 0)
+      .sort((a: { movie: CatalogMovie; score: number }, b: { movie: CatalogMovie; score: number }) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.movie.id - a.movie.id;
+      });
+
+    const totalResults = rankedMovies.length;
+    const totalPages = Math.max(1, Math.ceil(totalResults / safeLimit));
+    const start = (safePage - 1) * safeLimit;
+    const results = rankedMovies.slice(start, start + safeLimit).map((item: { movie: CatalogMovie }) => mapCatalogMovieToTmdbMovie(item.movie));
+
+    return {
+      data: {
+        page: safePage,
+        results,
+        total_pages: totalPages,
+        total_results: totalResults,
+      },
+    };
+  } catch (error: any) {
+    return {
+      data: {
+        page: safePage,
+        results: [],
+        total_pages: 1,
+        total_results: 0,
+      },
+      error: error.message,
+    };
+  }
+}
+
 export async function getAvailableMovies(limit = 30): Promise<{ movies: CatalogMovie[]; error?: string }> {
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 60);
 
@@ -324,6 +476,74 @@ export async function getAvailableMovies(limit = 30): Promise<{ movies: CatalogM
     return { movies: [], error: error.message };
   }
 }
+
+export async function getCatalogMoviesByGenre(
+  genreId: number,
+  page = 1,
+  limit = 24
+): Promise<{ movies: CatalogMovie[]; totalPages: number; totalResults: number; error?: string }> {
+  const safePage = Math.max(Math.floor(page), 1);
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 60);
+
+  try {
+    const response = await fetch(`${getApiUrl()}/api/movies?genreId=${encodeURIComponent(genreId)}`);
+    const payload = await readApiJson(response);
+
+    if (!response.ok || !payload.success) {
+      return { movies: [], totalPages: 1, totalResults: 0, error: payload.error || 'Khong the tai phim theo the loai.' };
+    }
+
+    const allMovies = (payload.movies || [])
+      .map(mapMovie)
+      .filter((movie: CatalogMovie) => movie.is_active !== false && (movie.status || 'active') === 'active')
+      .sort((a: CatalogMovie, b: CatalogMovie) => b.id - a.id);
+    const totalResults = allMovies.length;
+    const totalPages = Math.max(1, Math.ceil(totalResults / safeLimit));
+    const start = (safePage - 1) * safeLimit;
+
+    return {
+      movies: allMovies.slice(start, start + safeLimit),
+      totalPages,
+      totalResults,
+    };
+  } catch (error: any) {
+    return { movies: [], totalPages: 1, totalResults: 0, error: error.message };
+  }
+}
+
+export async function getCatalogMoviesByYear(
+  year: number,
+  page = 1,
+  limit = 24
+): Promise<{ movies: CatalogMovie[]; totalPages: number; totalResults: number; error?: string }> {
+  const safePage = Math.max(Math.floor(page), 1);
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 60);
+
+  try {
+    const response = await fetch(`${getApiUrl()}/api/movies?year=${encodeURIComponent(year)}`);
+    const payload = await readApiJson(response);
+
+    if (!response.ok || !payload.success) {
+      return { movies: [], totalPages: 1, totalResults: 0, error: payload.error || 'Khong the tai phim theo nam.' };
+    }
+
+    const allMovies = (payload.movies || [])
+      .map(mapMovie)
+      .filter((movie: CatalogMovie) => movie.is_active !== false && (movie.status || 'active') === 'active')
+      .sort((a: CatalogMovie, b: CatalogMovie) => b.id - a.id);
+    const totalResults = allMovies.length;
+    const totalPages = Math.max(1, Math.ceil(totalResults / safeLimit));
+    const start = (safePage - 1) * safeLimit;
+
+    return {
+      movies: allMovies.slice(start, start + safeLimit),
+      totalPages,
+      totalResults,
+    };
+  } catch (error: any) {
+    return { movies: [], totalPages: 1, totalResults: 0, error: error.message };
+  }
+}
 function getRankingView(period: MovieRankingPeriod = 'all') {
   if (period === 'week') return 'movie_rankings_weekly';
   if (period === 'month') return 'movie_rankings_monthly';
@@ -340,9 +560,7 @@ export async function getMovieRankings(
   try {
     const { data, error } = await supabase
       .from(viewName)
-      .select(
-        'movie_id, title, poster_path, poster_url, view_count, favorite_count, rating_count, average_rating, comment_count, ranking_score'
-      )
+      .select('*')
       .order('ranking_score', { ascending: false })
       .limit(safeLimit);
 
@@ -437,7 +655,10 @@ const CatalogService = {
   getMovieByInternalId,
   getMoviesByInternalIds,
   getAvailableMoviesByTmdbIds,
+  searchCatalogMovies,
   getAvailableMovies,
+  getCatalogMoviesByGenre,
+  getCatalogMoviesByYear,
   getMovieRankings,
   getSimilarMoviesByInternalId,
   ensureMovieFromTMDB,

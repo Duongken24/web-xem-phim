@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Play, Star } from 'lucide-react';
 import TMDBService from '../../services/tmdb.service';
@@ -47,6 +47,10 @@ const MovieCard: React.FC<MovieCardProps> = ({
   const location = useLocation();
   const [isHovered, setIsHovered] = useState(false);
   const [imageSrc, setImageSrc] = useState(image || TMDBService.getTMDBFallbackImage('poster'));
+
+  useEffect(() => {
+    setImageSrc(image || TMDBService.getTMDBFallbackImage('poster'));
+  }, [image]);
 
   const handleImageError = () => {
     setImageSrc(TMDBService.getTMDBFallbackImage('poster'));

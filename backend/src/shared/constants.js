@@ -6,6 +6,8 @@ export const AI_SERVICE_URL = (
   process.env.AI_SERVICE_URL || "http://127.0.0.1:8001"
 ).replace(/\/$/, "");
 
+export const USE_TMDB = String(process.env.USE_TMDB ?? 'true').trim().toLowerCase() !== 'false';
+
 export const MAX_UPLOAD_BYTES = Math.max(
   1024 * 1024,
   Number(process.env.MAX_UPLOAD_BYTES || 1024 * 1024 * 1024)

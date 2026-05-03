@@ -236,6 +236,10 @@ export interface AdminStorageHealth {
   error?: string;
 }
 
+export interface AdminSystemSettings {
+  use_tmdb: boolean;
+}
+
 interface ApiErrorPayload {
   success?: boolean;
   error?: string;
@@ -430,6 +434,17 @@ export const deleteAdminMovie = async (movieId: number) => {
 
 export const getAdminStorageHealth = async () => {
   return adminRequest<{ success: boolean; storage: AdminStorageHealth }>('/api/admin/storage/health');
+};
+
+export const getAdminSettings = async () => {
+  return adminRequest<{ success: true; use_tmdb?: boolean; settings?: AdminSystemSettings }>('/api/admin/settings');
+};
+
+export const updateAdminUseTmdb = async (enabled: boolean) => {
+  return adminRequest<{ success: true; use_tmdb: boolean; settings?: AdminSystemSettings }>('/api/admin/settings/use-tmdb', {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
 };
 
 export const uploadAdminMovieVideo = async (

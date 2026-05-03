@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Play } from 'lucide-react';
 import { useMovieDetails } from '../hooks/useTMDB';
@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 import VideoPlayer from '../components/movie/VideoPlayer';
 import CatalogService, { type CatalogMovie } from '../services/catalog.service';
 import { getApiBaseUrl } from '../services/api';
+import { USE_TMDB } from '../config/featureFlags';
 
 interface StreamPayload {
   success: boolean;
@@ -55,6 +56,10 @@ function getFriendlyStreamError(message: string) {
   return message;
 }
 
+function normalizeStreamUrl(url: string | null | undefined) {
+  return typeof url === 'string' ? url.trim() : '';
+}
+
 export default function WatchPageCatalog() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -67,7 +72,7 @@ export default function WatchPageCatalog() {
     movie: tmdbMovie,
     loading: tmdbLoading,
     error: movieError,
-  } = useMovieDetails(!isInternalWatchRoute && routeMovieId ? routeMovieId : null);
+  } = useMovieDetails(!isInternalWatchRoute && routeMovieId && USE_TMDB ? routeMovieId : null);
 
   const [catalogMovie, setCatalogMovie] = useState<CatalogMovie | null>(null);
   const [catalogMovieLoading, setCatalogMovieLoading] = useState(isInternalWatchRoute);
@@ -83,12 +88,100 @@ export default function WatchPageCatalog() {
 
   const initialProgressRatio =
     progress && progress.duration > 0 ? Math.min(1, Math.max(0, progress.watchPosition / progress.duration)) : 0;
+  const latestPlaybackRef = useRef({
+    playedSeconds: 0,
+    duration: 0,
+  });
+  const activeTargetRef = useRef<{
+    movieId: number | null;
+    episodeId: number | null;
+  }>({
+    movieId: null,
+    episodeId,
+  });
+  const lastForceSaveKeyRef = useRef('');
+  const flushProgressOnExitRef = useRef<() => void>(() => undefined);
+
+  const rememberPlayback = useCallback((playedSeconds: number, duration: number) => {
+    latestPlaybackRef.current = {
+      playedSeconds: Math.max(0, playedSeconds),
+      duration: Math.max(0, duration),
+    };
+  }, []);
+
+  const forceSaveLatestProgress = useCallback(
+    (playedSeconds: number, duration: number) => {
+      const normalizedDuration = Math.floor(duration);
+      const normalizedPlayedSeconds = Math.min(normalizedDuration, Math.floor(playedSeconds));
+      const { movieId, episodeId: targetEpisodeId } = activeTargetRef.current;
+
+      if (!movieId || normalizedDuration <= 0 || normalizedPlayedSeconds <= 0) return;
+
+      const nextKey = `${movieId}:${targetEpisodeId ?? 'movie'}:${normalizedPlayedSeconds}:${normalizedDuration}`;
+      if (lastForceSaveKeyRef.current === nextKey) return;
+
+      lastForceSaveKeyRef.current = nextKey;
+      void forceSaveProgress(normalizedPlayedSeconds, normalizedDuration);
+    },
+    [forceSaveProgress]
+  );
+
+  useEffect(() => {
+    if (catalogMovieId) {
+      activeTargetRef.current = {
+        movieId: catalogMovieId,
+        episodeId: catalogEpisodeId,
+      };
+      lastForceSaveKeyRef.current = '';
+      latestPlaybackRef.current = {
+        playedSeconds: 0,
+        duration: 0,
+      };
+    }
+  }, [catalogEpisodeId, catalogMovieId]);
+
+  useEffect(() => {
+    flushProgressOnExitRef.current = () => {
+      const { playedSeconds, duration } = latestPlaybackRef.current;
+      forceSaveLatestProgress(playedSeconds, duration);
+    };
+  }, [forceSaveLatestProgress]);
+
+  useEffect(() => {
+    const flushProgress = () => {
+      flushProgressOnExitRef.current();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushProgress();
+      }
+    };
+
+    window.addEventListener('pagehide', flushProgress);
+    window.addEventListener('beforeunload', flushProgress);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('pagehide', flushProgress);
+      window.removeEventListener('beforeunload', flushProgress);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushProgressOnExitRef.current();
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadCatalogMovie = async () => {
-      if (!isInternalWatchRoute || !routeMovieId) {
+      if (!routeMovieId) {
+        setCatalogMovie(null);
+        setCatalogMovieError(null);
+        setCatalogMovieLoading(false);
+        return;
+      }
+
+      if (!isInternalWatchRoute && USE_TMDB) {
         setCatalogMovie(null);
         setCatalogMovieError(null);
         setCatalogMovieLoading(false);
@@ -97,7 +190,9 @@ export default function WatchPageCatalog() {
 
       setCatalogMovieLoading(true);
       setCatalogMovieError(null);
-      const { movie, error } = await CatalogService.getMovieByInternalId(routeMovieId);
+      const { movie, error } = isInternalWatchRoute
+        ? await CatalogService.getMovieByInternalId(routeMovieId)
+        : await CatalogService.getMovieByTmdbId(routeMovieId);
 
       if (isMounted) {
         setCatalogMovie(movie);
@@ -157,8 +252,13 @@ export default function WatchPageCatalog() {
         const data: StreamPayload = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error || 'Không lấy được nguồn phát.');
 
+        const nextStreamUrl = normalizeStreamUrl(data.url);
+        if (!nextStreamUrl) {
+          throw new Error('Phim này chưa có nguồn phát, vui lòng quay lại sau.');
+        }
+
         setStreamPayload(data);
-        setStreamUrl(data.url);
+        setStreamUrl(nextStreamUrl);
         setCatalogMovieId(data.movie_id ?? data.movie?.id ?? null);
         setCatalogEpisodeId(data.episode_id ?? episodeId);
       } catch (error) {
@@ -173,7 +273,8 @@ export default function WatchPageCatalog() {
     void fetchStream();
   }, [routeMovieId, isInternalWatchRoute, episodeId, user?.id]);
 
-  const loading = isInternalWatchRoute ? catalogMovieLoading : tmdbLoading;
+  const useCatalogWatchData = isInternalWatchRoute || !USE_TMDB;
+  const loading = useCatalogWatchData ? catalogMovieLoading : tmdbLoading;
   const pageTitle = catalogMovie?.title || streamPayload?.title || tmdbMovie?.title || 'Phim';
   const pageOverview = catalogMovie?.overview || tmdbMovie?.overview || 'Chưa có mô tả cho phim này.';
   const detailHref = isInternalWatchRoute ? `/movie/id/${routeMovieId}` : `/movie/${routeMovieId}`;
@@ -226,7 +327,7 @@ export default function WatchPageCatalog() {
     );
   }
 
-  if ((!isInternalWatchRoute && (movieError || !tmdbMovie)) || (isInternalWatchRoute && catalogMovieError && !catalogMovie && !streamPayload)) {
+  if ((!useCatalogWatchData && (movieError || !tmdbMovie)) || (useCatalogWatchData && catalogMovieError && !catalogMovie && !streamPayload)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-black p-6 text-white">
         <div className="w-full max-w-xl rounded-3xl border border-red-500/20 bg-zinc-950/80 p-8 text-center">
@@ -305,23 +406,29 @@ export default function WatchPageCatalog() {
               initialProgress={initialProgressRatio}
               autoPlay
               onDuration={(duration) => {
+                rememberPlayback(latestPlaybackRef.current.playedSeconds, duration);
                 setMediaDuration(duration);
                 setIsPlayerLoading(false);
               }}
               onProgress={({ playedSeconds }) => {
+                const duration = latestPlaybackRef.current.duration || mediaDuration;
+                rememberPlayback(playedSeconds, duration);
                 if (catalogMovieId && mediaDuration > 0) {
                   void saveProgress(Math.floor(playedSeconds), Math.floor(mediaDuration));
                 }
               }}
               onPause={({ playedSeconds, duration }) => {
-                if (catalogMovieId && duration > 0) {
-                  void forceSaveProgress(Math.floor(playedSeconds), Math.floor(duration));
-                }
+                rememberPlayback(playedSeconds, duration);
+                forceSaveLatestProgress(playedSeconds, duration);
+              }}
+              onBeforeUnmount={({ playedSeconds, duration }) => {
+                rememberPlayback(playedSeconds, duration);
+                forceSaveLatestProgress(playedSeconds, duration);
               }}
               onEnded={() => {
-                if (catalogMovieId && mediaDuration > 0) {
-                  void forceSaveProgress(Math.floor(mediaDuration), Math.floor(mediaDuration));
-                }
+                const duration = latestPlaybackRef.current.duration || mediaDuration;
+                rememberPlayback(duration, duration);
+                forceSaveLatestProgress(duration, duration);
               }}
             />
           ) : (

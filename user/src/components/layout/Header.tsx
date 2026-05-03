@@ -169,16 +169,20 @@ const Header: React.FC = () => {
                 <div className="absolute left-0 top-full pt-2">
                   <div className="w-64 overflow-hidden rounded-lg border border-gray-800 bg-gray-900 shadow-xl">
                     <div className="max-h-96 overflow-y-auto py-2">
-                      {genres.map((genre) => (
-                        <Link
-                          key={genre.id}
-                          to={`/genre/${genre.id}`}
-                          className="block px-4 py-2 text-gray-300 transition hover:bg-gray-800 hover:text-orange-500"
-                          onClick={handleNavigate(`/genre/${genre.id}`)}
-                        >
-                          {genre.name}
-                        </Link>
-                      ))}
+                      {genres.length > 0 ? (
+                        genres.map((genre) => (
+                          <Link
+                            key={genre.id}
+                            to={`/genre/${genre.id}`}
+                            className="block px-4 py-2 text-gray-300 transition hover:bg-gray-800 hover:text-orange-500"
+                            onClick={handleNavigate(`/genre/${genre.id}`)}
+                          >
+                            {genre.name}
+                          </Link>
+                        ))
+                      ) : (
+                        <div className="px-4 py-3 text-sm text-gray-400">Chưa có thể loại để hiển thị.</div>
+                      )}
                     </div>
                   </div>
                 </div>

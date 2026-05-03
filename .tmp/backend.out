@@ -1,0 +1,33 @@
+
+> backend@1.0.0 dev
+> node server.js
+
+[dotenv@17.3.1] injecting env (22) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+[dotenv@17.3.1] injecting env (8) from ..\user\.env -- tip: ⚙️  override existing env vars with { override: true }
+ðŸš€ Server cháº¡y táº¡i http://localhost:5001
+ðŸ“‹ Routes:
+   GET /                              - Health check
+   GET /api/movies                    - Danh sÃ¡ch phim
+   GET /api/movies/:movieId/similar   - Similar movies by internal id
+   GET /api/stream/:tmdbId            - Stream link by TMDB id
+   POST /api/movies/ensure-tmdb       - Auto map TMDB movie
+   POST /api/ai/movie-recommendations - AI movie recommendations
+   POST /api/ai/movie-recommendations/personalized - Personalized AI movie recommendations
+   GET /api/admin/dashboard/test      - Test endpoint (no auth)
+   GET /api/admin/dashboard           - Admin dashboard
+   GET /api/admin/movies              - List admin movies
+   POST /api/admin/movies/upsert      - Upsert admin movie
+   GET /api/admin/stats               - Admin stats
+   GET /api/admin/users               - List users
+   GET /api/admin/plans               - List plans
+   GET /api/admin/subscriptions       - List subscriptions
+   GET /api/admin/content             - List content controls
+   GET /api/admin/watch-stats         - Watch statistics
+   POST /api/create-user              - Create admin user
+   PATCH /api/admin/users/:userId/role - Update user role
+   PATCH /api/admin/users/:userId/block - Block/unblock user
+   POST /api/admin/plans              - Create plan
+   PATCH /api/admin/plans/:planId     - Update plan
+   POST /api/admin/subscriptions/assign - Assign subscription
+   PATCH /api/admin/subscriptions/:id - Update subscription
+   POST /api/admin/content/upsert     - Upsert content control

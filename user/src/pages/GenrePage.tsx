@@ -6,6 +6,7 @@ import TMDBService from '../services/tmdb.service';
 import CatalogService from '../services/catalog.service';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import MovieCard from '../components/movie/MovieCard';
+import { USE_TMDB } from '../config/featureFlags';
 
 const GenrePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,6 +21,11 @@ const GenrePage: React.FC = () => {
     let active = true;
 
     const loadInternalMappings = async () => {
+      if (!USE_TMDB) {
+        if (active) setInternalMovieIdsByTmdb({});
+        return;
+      }
+
       if (movies.length === 0) {
         if (active) setInternalMovieIdsByTmdb({});
         return;
@@ -112,7 +118,8 @@ const GenrePage: React.FC = () => {
             <MovieCard
               key={movie.id}
               id={movie.id}
-              internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
+              internalMovieId={USE_TMDB ? internalMovieIdsByTmdb[movie.id] ?? null : movie.id}
+              href={USE_TMDB ? undefined : `/movie/id/${movie.id}`}
               title={movie.title}
               image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500')}
               quality="HD"

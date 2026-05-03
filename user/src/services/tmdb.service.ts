@@ -9,6 +9,7 @@ import type {
   TMDBSearchParams,
   TMDBVideosResponse,
 } from '../types/tmdb.types';
+import { USE_TMDB } from '../config/featureFlags';
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY;
 const TMDB_BASE_URL = import.meta.env.VITE_TMDB_BASE_URL || 'https://api.themoviedb.org/3';
@@ -26,6 +27,10 @@ type FetchParams = Record<string, string | number | boolean | null | undefined>;
 type TMDBFetchParams = TMDBSearchParams | TMDBDiscoverParams | FetchParams;
 
 async function tmdbFetch<T>(endpoint: string, params: TMDBFetchParams = {}): Promise<T> {
+  if (!USE_TMDB) {
+    throw new Error('TMDB is disabled by VITE_USE_TMDB=false');
+  }
+
   if (!TMDB_API_KEY) {
     throw new Error('Missing VITE_TMDB_API_KEY in user/.env');
   }

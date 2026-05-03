@@ -6,9 +6,11 @@ export const createAiRoutes = (dependencies) => {
   const router = Router();
   const service = createAiService(dependencies);
   const controller = createAiController(service);
+  const basePath = dependencies.basePath || "/api/ai";
 
-  router.post("/movie-recommendations", controller.movieRecommendations);
-  router.post("/movie-recommendations/personalized", controller.personalizedRecommendations);
+  router.post(`${basePath}/recommend`, controller.recommend);
+  router.post(`${basePath}/movie-recommendations`, controller.movieRecommendations);
+  router.post(`${basePath}/movie-recommendations/personalized`, controller.personalizedRecommendations);
 
   return router;
 };

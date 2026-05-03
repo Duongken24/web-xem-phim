@@ -1,7 +1,7 @@
 import express from "express";
-import { AI_SERVICE_URL } from "../lib/supabase.js";
-import { getUserFromToken } from "../services/auth-service.js";
-import { getAiFallbackMovies, normalizeAiMovie } from "../services/ai-movie-service.js";
+import { AI_SERVICE_URL } from "../../lib/supabase.js";
+import { getUserFromToken } from "../../services/auth-service.js";
+import { getAiFallbackMovies, normalizeAiMovie } from "./ai-movie-service.js";
 
 export const aiRouter = express.Router();
 

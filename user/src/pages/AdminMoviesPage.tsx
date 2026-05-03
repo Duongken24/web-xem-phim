@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import AdminLayout from './AdminLayout';
 import {
   deleteAdminMovie,
   getAdminMovies,
   getAdminMoviesMeta,
+  getAdminSettings,
   getAdminStorageHealth,
+  updateAdminUseTmdb,
   upsertAdminMovie,
   uploadAdminMovieVideo,
   type AdminCountry,
@@ -220,6 +222,11 @@ export default function AdminMoviesPage() {
   const [metadataError, setMetadataError] = useState('');
   const [storageHealth, setStorageHealth] = useState<AdminStorageHealth | null>(null);
   const [storageHealthError, setStorageHealthError] = useState('');
+  const [useTmdb, setUseTmdb] = useState(false);
+  const [tmdbLoading, setTmdbLoading] = useState(true);
+  const [tmdbSaving, setTmdbSaving] = useState(false);
+  const [tmdbError, setTmdbError] = useState('');
+  const [tmdbSuccessMessage, setTmdbSuccessMessage] = useState('');
 
   const filteredMovies = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -263,6 +270,37 @@ export default function AdminMoviesPage() {
     () => genres.filter((genre) => form.genreIds.includes(genre.id)),
     [genres, form.genreIds]
   );
+  const tmdbStatusLabel = tmdbSaving
+    ? 'Dang luu'
+    : tmdbLoading
+      ? 'Dang tai'
+      : useTmdb
+        ? 'Dang bat'
+        : 'Dang tat';
+  const tmdbStatusClassName = tmdbSaving || tmdbLoading
+    ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+    : useTmdb
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100'
+      : 'border-rose-500/30 bg-rose-500/10 text-rose-100';
+
+  const normalizeTmdbSettingsError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Khong the cap nhat cai dat TMDB.';
+    const lowered = message.toLowerCase();
+
+    if (lowered.includes('dang nhap')) {
+      return 'Ban can dang nhap bang tai khoan admin de doi che do TMDB.';
+    }
+
+    if (lowered.includes('quyen')) {
+      return 'Tai khoan hien tai khong co quyen thay doi cai dat TMDB.';
+    }
+
+    return message;
+  };
+
+  const readUseTmdbValue = (payload: { settings?: { use_tmdb?: boolean }; use_tmdb?: boolean } | null | undefined) => {
+    return Boolean(payload?.settings?.use_tmdb ?? payload?.use_tmdb ?? false);
+  };
 
   const loadMovies = async () => {
     setLoading(true);
@@ -307,10 +345,26 @@ export default function AdminMoviesPage() {
     }
   };
 
+  const loadTmdbSettings = async () => {
+    setTmdbLoading(true);
+    setTmdbError('');
+
+    try {
+      const payload = await getAdminSettings();
+      setUseTmdb(readUseTmdbValue(payload));
+    } catch (error) {
+      setUseTmdb(false);
+      setTmdbError(normalizeTmdbSettingsError(error));
+    } finally {
+      setTmdbLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadMovies();
     void loadMetadata();
     void loadStorageHealth();
+    void loadTmdbSettings();
   }, []);
 
   const toggleGenre = (genreId: number) => {
@@ -320,6 +374,29 @@ export default function AdminMoviesPage() {
         ? prev.genreIds.filter((item) => item !== genreId)
         : [...prev.genreIds, genreId],
     }));
+  };
+
+  const handleToggleTmdb = async () => {
+    const previousValue = useTmdb;
+    const nextValue = !previousValue;
+
+    setUseTmdb(nextValue);
+    setTmdbSaving(true);
+    setTmdbError('');
+    setTmdbSuccessMessage('');
+
+    try {
+      const payload = await updateAdminUseTmdb(nextValue);
+      const savedValue = readUseTmdbValue(payload);
+      setUseTmdb(savedValue);
+      setTmdbSuccessMessage(savedValue ? 'Da bat TMDB cho catalog hien tai.' : 'Da tat TMDB. He thong se uu tien database noi bo.');
+      await loadMovies();
+    } catch (error) {
+      setUseTmdb(previousValue);
+      setTmdbError(normalizeTmdbSettingsError(error));
+    } finally {
+      setTmdbSaving(false);
+    }
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -512,8 +589,37 @@ export default function AdminMoviesPage() {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              Flow chinh: luu phim - giu movie_id - upload video len R2 theo movie_id.
+            <div className="flex w-full flex-wrap items-center justify-end gap-3 lg:w-auto">
+              <div className="flex-none rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                Flow chinh: luu phim - giu movie_id - upload video len R2 theo movie_id.
+              </div>
+
+              <div className={`flex-none rounded-full border px-3 py-2 text-xs font-semibold ${tmdbStatusClassName}`}>
+                TMDB: {tmdbStatusLabel}
+              </div>
+
+              <div className="flex flex-none items-center gap-3 rounded-full border border-slate-700 bg-slate-950/70 px-3 py-2">
+                <span className="text-sm font-medium text-slate-200">Su dung TMDB</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={useTmdb}
+                  aria-label="Su dung TMDB"
+                  onClick={() => void handleToggleTmdb()}
+                  disabled={tmdbLoading || tmdbSaving}
+                  className={`relative inline-flex h-7 w-14 items-center rounded-full border transition ${
+                    useTmdb
+                      ? 'border-emerald-400/60 bg-emerald-500/30'
+                      : 'border-slate-600 bg-slate-800'
+                  } ${(tmdbLoading || tmdbSaving) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                      useTmdb ? 'translate-x-8' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -526,6 +632,18 @@ export default function AdminMoviesPage() {
           {successMessage ? (
             <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
               {successMessage}
+            </div>
+          ) : null}
+
+          {tmdbError ? (
+            <div className="mt-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {tmdbError}
+            </div>
+          ) : null}
+
+          {tmdbSuccessMessage ? (
+            <div className="mt-4 rounded-2xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
+              {tmdbSuccessMessage}
             </div>
           ) : null}
         </section>

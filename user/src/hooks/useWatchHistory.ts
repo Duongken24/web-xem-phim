@@ -5,6 +5,7 @@ import TMDBService from '../services/tmdb.service';
 import type { TMDBMovie } from '../types/tmdb.types';
 import { useCurrentUser } from './useAuth';
 import { WATCH_THRESHOLDS } from '../utils/constants';
+import { USE_TMDB } from '../config/featureFlags';
 
 export interface WatchHistoryMovie extends TMDBMovie {
   internalMovieId: number;
@@ -19,9 +20,10 @@ export interface WatchHistoryMovie extends TMDBMovie {
 }
 
 function toProgressPercent(watchPosition: number, duration: number, progress: number) {
-  return duration > 0
-    ? Math.min(100, Math.max(0, Math.round((watchPosition / duration) * 100)))
-    : progress;
+  if (duration <= 0) return progress;
+  if (watchPosition <= 0) return 0;
+
+  return Math.min(100, Math.max(1, Math.round((watchPosition / duration) * 100)));
 }
 
 function mapCatalogMovieToHistoryMovie(
@@ -109,7 +111,7 @@ export function useWatchHistory() {
 
             const tmdbId = catalogMovie.tmdb_id;
 
-            if (!tmdbId) {
+            if (!tmdbId || !USE_TMDB) {
               return mapCatalogMovieToHistoryMovie(catalogMovie, item);
             }
 
@@ -160,10 +162,12 @@ export function useWatchHistory() {
     fetchHistory();
   }, [fetchHistory]);
 
+  const continueWatchingThreshold = Math.min(WATCH_THRESHOLDS.CONTINUE_WATCHING, 1);
+
   const continueWatching = [...historyItems]
     .filter(
       (movie) =>
-        movie.progressPercent >= WATCH_THRESHOLDS.CONTINUE_WATCHING &&
+        movie.progressPercent >= continueWatchingThreshold &&
         movie.progressPercent < WATCH_THRESHOLDS.CONSIDERED_WATCHED
     )
     .sort(
@@ -220,9 +224,25 @@ export function useMovieProgress(movieId: number | null, episodeId?: number | nu
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const lastSaveRef = useRef<number>(0);
+  const activeTargetRef = useRef<{
+    movieId: number | null;
+    episodeId: number | null;
+  }>({
+    movieId,
+    episodeId: episodeId ?? null,
+  });
 
   useEffect(() => {
     lastSaveRef.current = 0;
+  }, [movieId, episodeId]);
+
+  useEffect(() => {
+    if (movieId) {
+      activeTargetRef.current = {
+        movieId,
+        episodeId: episodeId ?? null,
+      };
+    }
   }, [movieId, episodeId]);
 
   // Load saved progress on mount
@@ -243,57 +263,60 @@ export function useMovieProgress(movieId: number | null, episodeId?: number | nu
     loadProgress();
   }, [user, movieId, episodeId]);
 
-  // Save progress (debounced - saves every 10 seconds minimum)
-  const saveProgress = useCallback(
-    async (watchPosition: number, duration: number) => {
-      if (!user || !movieId) return;
+  const persistProgress = useCallback(
+    async (watchPosition: number, duration: number, force: boolean) => {
+      if (!user) return;
 
-      const now = Date.now();
-      // Only save if 10 seconds have passed since last save
-      if (now - lastSaveRef.current < 10000) return;
+      const targetMovieId = movieId ?? activeTargetRef.current.movieId;
+      const targetEpisodeId =
+        targetMovieId === movieId ? (episodeId ?? null) : activeTargetRef.current.episodeId;
+      const normalizedDuration = Math.floor(duration);
+      const normalizedWatchPosition = Math.min(normalizedDuration, Math.floor(watchPosition));
 
-      lastSaveRef.current = now;
+      if (!targetMovieId || normalizedDuration <= 0 || normalizedWatchPosition <= 0) return;
+
+      if (!force) {
+        const now = Date.now();
+        // Only save if 10 seconds have passed since last save
+        if (now - lastSaveRef.current < 10000) return;
+        lastSaveRef.current = now;
+      } else {
+        lastSaveRef.current = Date.now();
+      }
+
       const result = await SupabaseService.addToHistory(
         user.id,
-        movieId,
-        watchPosition,
-        duration,
-        episodeId ?? undefined
+        targetMovieId,
+        normalizedWatchPosition,
+        normalizedDuration,
+        targetEpisodeId ?? undefined
       );
 
       if (result.success) {
         setProgress({
-          watchPosition,
-          progress: duration > 0 ? Math.round((watchPosition / duration) * 100) : 0,
-          duration,
+          watchPosition: normalizedWatchPosition,
+          progress: normalizedDuration > 0 ? Math.round((normalizedWatchPosition / normalizedDuration) * 100) : 0,
+          duration: normalizedDuration,
         });
       }
     },
-    [user, movieId, episodeId]
+    [episodeId, movieId, user]
+  );
+
+  // Save progress (debounced - saves every 10 seconds minimum)
+  const saveProgress = useCallback(
+    async (watchPosition: number, duration: number) => {
+      await persistProgress(watchPosition, duration, false);
+    },
+    [persistProgress]
   );
 
   // Force save (for when video ends or user leaves)
   const forceSaveProgress = useCallback(
     async (watchPosition: number, duration: number) => {
-      if (!user || !movieId) return;
-      lastSaveRef.current = Date.now();
-      const result = await SupabaseService.addToHistory(
-        user.id,
-        movieId,
-        watchPosition,
-        duration,
-        episodeId ?? undefined
-      );
-
-      if (result.success) {
-        setProgress({
-          watchPosition,
-          progress: duration > 0 ? Math.round((watchPosition / duration) * 100) : 0,
-          duration,
-        });
-      }
+      await persistProgress(watchPosition, duration, true);
     },
-    [user, movieId, episodeId]
+    [persistProgress]
   );
 
   // Get initial position (as fraction 0-1 for video player)

@@ -8,7 +8,10 @@
     "start": "node server.js",
     "start:bg": "bash ./start-background.sh",
     "stop:bg": "bash ./stop-background.sh",
-    "status:bg": "bash ./status-background.sh"
+    "status:bg": "bash ./status-background.sh",
+    "dev:backend": "node server.js",
+    "dev:ai": "cd ../ai && python3 ai_service.py",
+    "health:ai": "curl -s http://127.0.0.1:8001/health"
   },
   "keywords": [],
   "author": "",

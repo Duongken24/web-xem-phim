@@ -1,4 +1,16 @@
 export const createAiController = (service) => ({
+  async recommend(req, res) {
+    try {
+      const payload = await service.getDirectRecommendations(req);
+      return res.json(payload);
+    } catch (err) {
+      return res.status(err.statusCode || 500).json({
+        success: false,
+        error: err.message || "Khong the lay goi y phim.",
+      });
+    }
+  },
+
   async movieRecommendations(req, res) {
     try {
       const payload = await service.getMovieRecommendations(req);

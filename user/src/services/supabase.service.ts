@@ -1,9 +1,17 @@
-import { supabase } from '../lib/supabase';
+﻿import { supabase } from '../lib/supabase';
 
 /**
  * Supabase Service - User Data Operations
  * Architecture: Only store movie_id, fetch metadata from the internal catalog service at runtime
  */
+
+function hasValidUserId(userId: string) {
+  return typeof userId === 'string' && userId.trim().length > 0;
+}
+
+function isValidPositiveNumber(value: number) {
+  return Number.isFinite(value) && value > 0;
+}
 
 // ============================================
 // WATCHLIST OPERATIONS
@@ -20,6 +28,10 @@ export interface WatchlistItem {
  * Add movie to user's watchlist
  */
 export async function addToWatchlist(userId: string, movieId: number): Promise<{ success: boolean; error?: string }> {
+  if (!hasValidUserId(userId) || !isValidPositiveNumber(movieId)) {
+    return { success: false, error: 'Thiếu thông tin người dùng hoặc phim hợp lệ.' };
+  }
+
   try {
     // First check if already exists to avoid duplicate errors
     const { data: existing } = await supabase
@@ -56,6 +68,10 @@ export async function addToWatchlist(userId: string, movieId: number): Promise<{
  * Remove movie from user's watchlist
  */
 export async function removeFromWatchlist(userId: string, movieId: number): Promise<{ success: boolean; error?: string }> {
+  if (!hasValidUserId(userId) || !isValidPositiveNumber(movieId)) {
+    return { success: false, error: 'Thiếu thông tin người dùng hoặc phim hợp lệ.' };
+  }
+
   try {
     const { error } = await supabase
       .from('favorites')
@@ -77,6 +93,10 @@ export async function removeFromWatchlist(userId: string, movieId: number): Prom
  * Get user's watchlist (returns only movie_ids)
  */
 export async function getWatchlist(userId: string): Promise<{ movieIds: number[]; error?: string }> {
+  if (!hasValidUserId(userId)) {
+    return { movieIds: [], error: 'Thiếu thông tin người dùng.' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('favorites')
@@ -99,6 +119,10 @@ export async function getWatchlist(userId: string): Promise<{ movieIds: number[]
  * Check if movie is in user's watchlist
  */
 export async function isInWatchlist(userId: string, movieId: number): Promise<boolean> {
+  if (!hasValidUserId(userId) || !isValidPositiveNumber(movieId)) {
+    return false;
+  }
+
   try {
     const { data, error } = await supabase
       .from('favorites')
@@ -142,6 +166,14 @@ export async function addToHistory(
   duration: number,
   episodeId?: number
 ): Promise<{ success: boolean; error?: string }> {
+  if (!hasValidUserId(userId) || !isValidPositiveNumber(movieId)) {
+    return { success: false, error: 'Thiếu thông tin người dùng hoặc phim hợp lệ.' };
+  }
+
+  if (!Number.isFinite(watchPosition) || !Number.isFinite(duration) || duration <= 0 || watchPosition < 0) {
+    return { success: false, error: 'Tiến trình xem phim không hợp lệ.' };
+  }
+
   try {
     const progress = duration > 0 ? Math.round((watchPosition / duration) * 100) : 0;
 
@@ -219,6 +251,10 @@ export async function getWatchHistory(userId: string, limit: number = 20): Promi
   }>;
   error?: string;
 }> {
+  if (!hasValidUserId(userId)) {
+    return { items: [], error: 'Thiếu thông tin người dùng.' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('watch_history')
@@ -255,6 +291,10 @@ export async function getWatchProgress(userId: string, movieId: number, episodeI
   progress: number;
   duration: number;
 } | null> {
+  if (!hasValidUserId(userId) || !isValidPositiveNumber(movieId)) {
+    return null;
+  }
+
   try {
     let query = supabase
       .from('watch_history')
@@ -380,6 +420,33 @@ export async function getUserRating(userId: string, movieId: number): Promise<Ra
     return data?.[0] || null;
   } catch {
     return null;
+  }
+}
+
+export async function getUserRatings(userId: string, limit: number = 20): Promise<{ ratings: Rating[]; error?: string }> {
+  try {
+    const { data, error } = await supabase
+      .from('ratings')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(Math.max(limit * 3, limit));
+
+    if (error) {
+      return { ratings: [], error: error.message };
+    }
+
+    const uniqueRatings = new Map<number, Rating>();
+
+    for (const item of data || []) {
+      if (!uniqueRatings.has(item.movie_id)) {
+        uniqueRatings.set(item.movie_id, item as Rating);
+      }
+    }
+
+    return { ratings: Array.from(uniqueRatings.values()).slice(0, limit) };
+  } catch (error: any) {
+    return { ratings: [], error: error.message };
   }
 }
 
@@ -516,6 +583,7 @@ const SupabaseService = {
   // Ratings
   addRating,
   getUserRating,
+  getUserRatings,
   getMovieRatings,
 
   // Comments

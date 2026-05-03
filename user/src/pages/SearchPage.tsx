@@ -1,17 +1,38 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Clapperboard, Search as SearchIcon, Sparkles } from 'lucide-react';
 import { useMovieSearch } from '../hooks/useTMDB';
 import TMDBService from '../services/tmdb.service';
-import CatalogService from '../services/catalog.service';
+import CatalogService, { type CatalogMovie } from '../services/catalog.service';
 import { requestAiMovieRecommendations, type AiRecommendationMovie } from '../services/ai-chat.service';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import MovieCard from '../components/movie/MovieCard';
 import SearchBar from '../components/ui/SearchBar';
+import { USE_TMDB } from '../config/featureFlags';
 import { logSearchAnalytics } from '../services/analytics.service';
+import { formatRecommendationReasonText } from '../utils/recommendationReason';
 
 function sanitizeQuery(query: string): string {
   return query.replace(/[<>]/g, '').trim().slice(0, 100);
+}
+
+function catalogMovieToSearchMovie(movie: CatalogMovie) {
+  return {
+    id: movie.id,
+    title: movie.title,
+    original_title: movie.original_title || movie.title,
+    overview: movie.overview || '',
+    poster_path: movie.poster_url || movie.poster_path,
+    backdrop_path: movie.backdrop_url || movie.backdrop_path,
+    release_date: movie.release_date || (movie.release_year ? `${movie.release_year}-01-01` : ''),
+    genre_ids: [],
+    adult: false,
+    original_language: 'vi',
+    popularity: 0,
+    vote_average: movie.vote_average || 0,
+    vote_count: movie.vote_count || 0,
+    video: false,
+  };
 }
 
 const quickSuggestions = ['Avatar', 'Spider-Man', 'Harry Potter', 'Fast & Furious'];
@@ -22,11 +43,22 @@ const quickAiPrompts = [
   'Phim giống Spider-Man',
 ];
 
+function resolvePosterImage(pathOrUrl: string | null | undefined) {
+  if (!pathOrUrl) return TMDBService.getTMDBFallbackImage('poster');
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  if (pathOrUrl.startsWith('/')) return pathOrUrl;
+  return TMDBService.getTMDBImageUrl(pathOrUrl, 'w500', 'poster');
+}
+
 const SearchPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawQuery = searchParams.get('q') || '';
   const query = sanitizeQuery(rawQuery);
+  const typeFilter = searchParams.get('type');
+  const trendingFilter = searchParams.get('trending') === 'true';
+  const featuredFilter = searchParams.get('featured') === 'true';
+  const hasCatalogFilter = Boolean(typeFilter || trendingFilter || featuredFilter);
   const [page, setPage] = useState(1);
   const [aiQuery, setAiQuery] = useState('');
   const [lastAiSearch, setLastAiSearch] = useState('');
@@ -36,10 +68,23 @@ const SearchPage: React.FC = () => {
   const [aiWarning, setAiWarning] = useState('');
   const [aiExplanation, setAiExplanation] = useState('');
   const [aiSource, setAiSource] = useState('');
+  const [aiPosterByInternalMovieId, setAiPosterByInternalMovieId] = useState<Record<number, string>>({});
   const [internalMovieIdsByTmdb, setInternalMovieIdsByTmdb] = useState<Record<number, number>>({});
+  const [catalogFilterMovies, setCatalogFilterMovies] = useState<ReturnType<typeof catalogMovieToSearchMovie>[]>([]);
+  const [catalogFilterLoading, setCatalogFilterLoading] = useState(false);
+  const [catalogFilterError, setCatalogFilterError] = useState<Error | null>(null);
   const lastLoggedSearchKey = useRef('');
 
-  const { movies, loading, error, data } = useMovieSearch(query, true, page);
+  const { movies: searchMovies, loading: searchLoading, error: searchError, data: searchData } = useMovieSearch(query, !hasCatalogFilter, page);
+  const movies = hasCatalogFilter ? catalogFilterMovies : searchMovies;
+  const loading = hasCatalogFilter ? catalogFilterLoading : searchLoading;
+  const error = hasCatalogFilter ? catalogFilterError : searchError;
+  const data = hasCatalogFilter
+    ? {
+        total_results: catalogFilterMovies.length,
+        total_pages: 1,
+      }
+    : searchData;
   const totalResults = data?.total_results || 0;
   const totalPages = data?.total_pages || 1;
   const showingCount = movies.length;
@@ -48,13 +93,64 @@ const SearchPage: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [query]);
+  }, [query, typeFilter, trendingFilter, featuredFilter]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadFilteredMovies = async () => {
+      if (!hasCatalogFilter) {
+        setCatalogFilterMovies([]);
+        setCatalogFilterLoading(false);
+        setCatalogFilterError(null);
+        return;
+      }
+
+      try {
+        setCatalogFilterLoading(true);
+        setCatalogFilterError(null);
+        const { movies: catalogMovies, error: catalogError } = await CatalogService.getAvailableMovies(60);
+
+        if (catalogError) {
+          throw new Error(catalogError);
+        }
+
+        if (!active) return;
+
+        const filteredMovies = catalogMovies
+          .filter((movie) => {
+            if (typeFilter && movie.type !== typeFilter) return false;
+            if (trendingFilter && !movie.is_trending) return false;
+            if (featuredFilter && !movie.is_featured) return false;
+            return true;
+          })
+          .map(catalogMovieToSearchMovie);
+
+        setCatalogFilterMovies(filteredMovies);
+      } catch (nextError) {
+        if (active) {
+          setCatalogFilterMovies([]);
+          setCatalogFilterError(nextError as Error);
+        }
+      } finally {
+        if (active) {
+          setCatalogFilterLoading(false);
+        }
+      }
+    };
+
+    void loadFilteredMovies();
+
+    return () => {
+      active = false;
+    };
+  }, [featuredFilter, hasCatalogFilter, trendingFilter, typeFilter]);
 
   useEffect(() => {
     let active = true;
 
     const loadInternalMappings = async () => {
-      if (!query || movieIds.length === 0) {
+      if (!USE_TMDB || !query || movieIds.length === 0) {
         if (active) {
           setInternalMovieIdsByTmdb((prev) => (Object.keys(prev).length === 0 ? prev : {}));
         }
@@ -101,18 +197,89 @@ const SearchPage: React.FC = () => {
       query,
       normalized_query: query.toLowerCase(),
       source_page: '/search',
-      filters_json: { page: 1, source: 'tmdb_search' },
+      filters_json: { page: 1, source: USE_TMDB ? 'tmdb_search' : 'catalog_search' },
       result_count: totalResults,
     });
   }, [error, loading, page, query, totalResults]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadAiPosters = async () => {
+      const internalMovieIds = Array.from(
+        new Set(
+          aiMovies
+            .map((movie) => {
+              if (typeof movie.internal_movie_id === 'number' && movie.internal_movie_id > 0) {
+                return movie.internal_movie_id;
+              }
+
+              if (typeof movie.movie_id === 'number' && movie.movie_id > 0) {
+                return movie.movie_id;
+              }
+
+              return null;
+            })
+            .filter((movieId): movieId is number => movieId !== null)
+        )
+      );
+
+      if (internalMovieIds.length === 0) {
+        if (active) {
+          setAiPosterByInternalMovieId({});
+        }
+        return;
+      }
+
+      const movieResults = await Promise.all(
+        internalMovieIds.map((movieId) => CatalogService.getMovieByInternalId(movieId))
+      );
+      if (!active) return;
+
+      const nextPosterMap = movieResults.reduce<Record<number, string>>((acc, result, index) => {
+        const movie = result.movie;
+        const fallbackMovieId = internalMovieIds[index];
+        const poster = movie ? resolvePosterImage(movie.poster_url || movie.poster_path) : null;
+
+        if (fallbackMovieId > 0 && poster) {
+          acc[fallbackMovieId] = poster;
+        }
+        return acc;
+      }, {});
+
+      setAiPosterByInternalMovieId(nextPosterMap);
+    };
+
+    void loadAiPosters();
+
+    return () => {
+      active = false;
+    };
+  }, [aiMovies]);
+
   const resultSummary = useMemo(() => {
+    if (hasCatalogFilter) return 'Hiển thị phim từ thư viện nội bộ theo bộ lọc đã chọn.';
     if (!query) return 'Tìm theo tên phim để khám phá nhanh nội dung bạn muốn xem.';
     if (loading) return `Thêm Phim đang tìm kết quả phù hợp với từ khóa "${query}".`;
     if (error) return 'Không thể lấy dữ liệu tìm kiếm lúc này. Bạn có thể thử lại sau ít phút.';
     if (movies.length === 0) return `Chưa tìm thấy nội dung phù hợp với "${query}".`;
     return `Hiển thị ${showingCount} phim trên trang ${page}, tổng cộng ${totalResults.toLocaleString()} kết quả.`;
-  }, [error, loading, movies.length, page, query, showingCount, totalResults]);
+  }, [error, hasCatalogFilter, loading, movies.length, page, query, showingCount, totalResults]);
+
+  const resultTitle = hasCatalogFilter
+    ? typeFilter === 'single'
+      ? 'Phim lẻ mới'
+      : typeFilter === 'series'
+        ? 'Phim bộ mới'
+        : trendingFilter
+          ? 'Phim đang nổi'
+          : featuredFilter
+            ? 'Phim nổi bật'
+            : 'Danh sách phim'
+    : 'Kết quả tìm kiếm';
+
+  const resultLabel = hasCatalogFilter ? 'Bộ lọc' : 'Từ khóa';
+  const resultValue = hasCatalogFilter ? resultTitle : query;
 
   const handleSearch = (nextQuery: string) => {
     navigate(`/search?q=${encodeURIComponent(sanitizeQuery(nextQuery))}`);
@@ -155,10 +322,21 @@ const SearchPage: React.FC = () => {
   };
 
   const getAiPosterUrl = (movie: AiRecommendationMovie) => {
-    if (movie.poster_url?.startsWith('http')) return movie.poster_url;
-    if (movie.poster_path?.startsWith('http')) return movie.poster_path;
-    if (movie.poster_url) return TMDBService.getTMDBImageUrl(movie.poster_url, 'w500', 'poster');
-    return TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster');
+    const internalMovieId =
+      typeof movie.internal_movie_id === 'number' && movie.internal_movie_id > 0
+        ? movie.internal_movie_id
+        : typeof movie.movie_id === 'number' && movie.movie_id > 0
+          ? movie.movie_id
+          : null;
+
+    if (internalMovieId && aiPosterByInternalMovieId[internalMovieId]) {
+      return aiPosterByInternalMovieId[internalMovieId];
+    }
+
+    if (movie.poster_url) return resolvePosterImage(movie.poster_url);
+    if (movie.poster_path) return resolvePosterImage(movie.poster_path);
+
+    return TMDBService.getTMDBFallbackImage('poster');
   };
 
   const getAiMovieHref = (movie: AiRecommendationMovie) => {
@@ -182,6 +360,22 @@ const SearchPage: React.FC = () => {
 
   const getAiCardLabel = (movie: AiRecommendationMovie) => {
     return movie.action_type === 'watch_now' ? 'Xem ngay' : 'Xem chi tiết';
+  };
+
+  const getSearchResultInternalMovieId = (movie: { id: number }) => {
+    if (!USE_TMDB) {
+      return movie.id;
+    }
+
+    return internalMovieIdsByTmdb[movie.id] ?? null;
+  };
+
+  const getSearchResultHref = (movie: { id: number }) => {
+    if (!USE_TMDB) {
+      return `/movie/id/${movie.id}`;
+    }
+
+    return undefined;
   };
 
   const getAiSourceLabel = () => {
@@ -209,7 +403,9 @@ const SearchPage: React.FC = () => {
           </div>
           <h2 className="text-2xl font-bold text-white md:text-3xl">Chat với AI để tìm phim hợp gu</h2>
           <p className="mt-3 text-sm leading-7 text-gray-400">
-            Mô tả tâm trạng, thể loại hoặc kiểu phim bạn muốn xem. AI sẽ ưu tiên phim trong hệ thống trước, sau đó mới bổ sung thêm từ TMDB nếu cần.
+            {USE_TMDB
+              ? 'Mô tả tâm trạng, thể loại hoặc kiểu phim bạn muốn xem. AI sẽ ưu tiên phim trong hệ thống trước, sau đó mới bổ sung thêm từ TMDB nếu cần.'
+              : 'Mô tả tâm trạng, thể loại hoặc kiểu phim bạn muốn xem. AI sẽ chỉ gợi ý những phim hiện có trong thư viện nội bộ.'}
           </p>
         </div>
 
@@ -344,11 +540,7 @@ const SearchPage: React.FC = () => {
                 type={getAiCardLabel(movie)}
                 rating={movie.average_rating}
                 year={movie.release_year ? String(movie.release_year) : ''}
-                overview={
-                  movie.reason ||
-                  movie.reason_tags?.slice(0, 3).join(' · ') ||
-                  'Gợi ý phù hợp với lựa chọn của bạn.'
-                }
+                overview={formatRecommendationReasonText(movie.reason, movie.reason_tags, 'Gợi ý phù hợp với lựa chọn của bạn.')}
                 showProgress={false}
                 analytics={{
                   sourcePage: '/search',
@@ -411,15 +603,15 @@ const SearchPage: React.FC = () => {
               Khám phá theo từ khóa
             </div>
             <h1 className="text-3xl font-bold text-white md:text-4xl">
-              Kết quả cho <span className="text-orange-400">"{query}"</span>
+              <span className="text-orange-400">{resultTitle}</span>
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-gray-400 md:text-base">{resultSummary}</p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Từ khóa</p>
-              <p className="mt-1 text-sm font-semibold text-white">{query}</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">{resultLabel}</p>
+              <p className="mt-1 text-sm font-semibold text-white">{resultValue}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3">
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Kết quả</p>
@@ -493,11 +685,12 @@ const SearchPage: React.FC = () => {
               <MovieCard
                 key={movie.id}
                 id={movie.id}
-                internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
+                internalMovieId={getSearchResultInternalMovieId(movie)}
+                href={getSearchResultHref(movie)}
                 title={movie.title}
                 image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster')}
                 quality={movie.vote_average >= 7 ? '4K' : 'HD'}
-                type="Phim lẻ"
+                type={USE_TMDB ? 'Phim lẻ' : 'Phim nội bộ'}
                 rating={movie.vote_average}
                 year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
                 overview={movie.overview}
@@ -554,10 +747,11 @@ const SearchPage: React.FC = () => {
     <div className="min-h-screen bg-gray-950 pb-16 pt-24">
       <div className="container mx-auto space-y-8 px-4 md:px-8 lg:px-16">
         {renderAiRecommendations()}
-        {!query ? renderEmptyQueryState() : renderResultsState()}
+        {!query && !hasCatalogFilter ? renderEmptyQueryState() : renderResultsState()}
       </div>
     </div>
   );
 };
 
 export default SearchPage;
+

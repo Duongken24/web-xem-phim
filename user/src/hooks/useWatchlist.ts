@@ -142,11 +142,17 @@ export function useWatchlist() {
 
   const addToWatchlist = async (movieOrId: TMDBMovieDetail | number | string) => {
     if (!user) {
+      setError('Vui lòng đăng nhập để thêm phim vào danh sách.');
       return { success: false, error: 'Please login to add to watchlist' };
     }
 
+    setError(null);
+
     const tmdbId = typeof movieOrId === 'object' ? movieOrId.id : normalizeMovieId(movieOrId);
-    if (!tmdbId) return { success: false, error: 'Invalid TMDB movie id' };
+    if (!tmdbId) {
+      setError('Không xác định được phim để thêm vào danh sách.');
+      return { success: false, error: 'Invalid TMDB movie id' };
+    }
 
     try {
       const movieDetail =
@@ -160,54 +166,74 @@ export function useWatchlist() {
       const result = await SupabaseService.addToWatchlist(user.id, catalogMovie.id);
 
       if (result.success) {
+        setError(null);
         setMovieIds((prev) => (prev.includes(catalogMovie.id) ? prev : [catalogMovie.id, ...prev]));
         setTmdbIds((prev) => (prev.includes(tmdbId) ? prev : [tmdbId, ...prev]));
         setMovies((prev) => {
           if (prev.some((movie) => movie.id === tmdbId)) return prev;
           return [mergeTMDBWithCatalog(movieDetail, catalogMovie), ...prev];
         });
+      } else {
+        setError(result.error || 'Không thể thêm phim vào danh sách.');
       }
 
       return result;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add to watchlist';
+      setError(message);
       return {
         success: false,
-        error: err instanceof Error ? err.message : 'Failed to add to watchlist',
+        error: message,
       };
     }
   };
 
   const removeFromWatchlist = async (movieOrId: TMDBMovieDetail | number | string) => {
     if (!user) {
+      setError('Vui lòng đăng nhập để cập nhật danh sách.');
       return { success: false, error: 'User not authenticated' };
     }
 
+    setError(null);
+
     const tmdbId = typeof movieOrId === 'object' ? movieOrId.id : normalizeMovieId(movieOrId);
-    if (!tmdbId) return { success: false, error: 'Invalid TMDB movie id' };
-
-    const existingMovie = movies.find((movie) => movie.id === tmdbId);
-    let catalogId = existingMovie?.catalogId;
-
-    if (!catalogId) {
-      const { movie: catalogMovie } = await CatalogService.getMovieByTmdbId(tmdbId);
-      catalogId = catalogMovie?.id;
+    if (!tmdbId) {
+      setError('Không xác định được phim để xóa khỏi danh sách.');
+      return { success: false, error: 'Invalid TMDB movie id' };
     }
 
-    if (!catalogId) {
-      setTmdbIds((prev) => prev.filter((id) => id !== tmdbId));
-      setMovies((prev) => prev.filter((movie) => movie.id !== tmdbId));
-      return { success: true };
+    try {
+      const existingMovie = movies.find((movie) => movie.id === tmdbId);
+      let catalogId = existingMovie?.catalogId;
+
+      if (!catalogId) {
+        const { movie: catalogMovie } = await CatalogService.getMovieByTmdbId(tmdbId);
+        catalogId = catalogMovie?.id;
+      }
+
+      if (!catalogId) {
+        setTmdbIds((prev) => prev.filter((id) => id !== tmdbId));
+        setMovies((prev) => prev.filter((movie) => movie.id !== tmdbId));
+        return { success: true };
+      }
+
+      const result = await SupabaseService.removeFromWatchlist(user.id, catalogId);
+
+      if (result.success) {
+        setError(null);
+        setMovieIds((prev) => prev.filter((id) => id !== catalogId));
+        setTmdbIds((prev) => prev.filter((id) => id !== tmdbId));
+        setMovies((prev) => prev.filter((movie) => movie.id !== tmdbId));
+      } else {
+        setError(result.error || 'Không thể xóa phim khỏi danh sách.');
+      }
+
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to remove from watchlist';
+      setError(message);
+      return { success: false, error: message };
     }
-
-    const result = await SupabaseService.removeFromWatchlist(user.id, catalogId);
-
-    if (result.success) {
-      setMovieIds((prev) => prev.filter((id) => id !== catalogId));
-      setTmdbIds((prev) => prev.filter((id) => id !== tmdbId));
-      setMovies((prev) => prev.filter((movie) => movie.id !== tmdbId));
-    }
-
-    return result;
   };
 
   const isInWatchlist = (movieId: number | string) => {
@@ -245,6 +271,7 @@ export function useIsInWatchlist(movieId: number | string) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
     const tmdbId = normalizeMovieId(movieId);
 
     if (!user || !tmdbId) {
@@ -255,12 +282,29 @@ export function useIsInWatchlist(movieId: number | string) {
 
     const checkWatchlist = async () => {
       setLoading(true);
-      const { movie: catalogMovie } = await CatalogService.getMovieByTmdbId(tmdbId);
-      setIsInList(catalogMovie ? await SupabaseService.isInWatchlist(user.id, catalogMovie.id) : false);
-      setLoading(false);
+      try {
+        const { movie: catalogMovie } = await CatalogService.getMovieByTmdbId(tmdbId);
+        const isSaved = catalogMovie ? await SupabaseService.isInWatchlist(user.id, catalogMovie.id) : false;
+
+        if (isMounted) {
+          setIsInList(isSaved);
+        }
+      } catch {
+        if (isMounted) {
+          setIsInList(false);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
     };
 
-    checkWatchlist();
+    void checkWatchlist();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, movieId]);
 
   return { isInList, loading };

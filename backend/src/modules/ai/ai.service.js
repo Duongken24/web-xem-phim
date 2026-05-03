@@ -1,6 +1,8 @@
 export const createAiService = ({
   buildBehaviorProfileQuery,
+  checkAiRecommendationServiceHealth,
   callAiRecommendationService,
+  isTmdbEnabled,
   getAiFallbackMovies,
   getCatalogFallbackMovies,
   getBehaviorRecommendationMovies,
@@ -10,6 +12,189 @@ export const createAiService = ({
   mergeHybridRecommendationItems,
   persistChatRecommendationLogs,
 }) => ({
+  buildEmptyDirectRecommendationResult({
+    query,
+    onlyDatabaseMovies,
+    warning = "",
+    explanation = "",
+    source = "fallback",
+  }) {
+    return {
+      success: true,
+      source,
+      query,
+      normalizedQuery: query,
+      normalized_query: query,
+      detectedFilters: {},
+      detected_filters: {},
+      warning,
+      explanation,
+      only_database_movies: onlyDatabaseMovies,
+      recommended_movies: [],
+      movies: [],
+      items: [],
+    };
+  },
+
+  async getDirectRecommendations(req) {
+    const query = String(req.body?.query || "").replace(/[<>]/g, "").trim().slice(0, 240);
+    const topN = Math.max(1, Math.min(Number(req.body?.top_n || req.body?.limit || 10), 50));
+    const requestedOnlyDatabaseMovies = req.body?.only_database_movies !== undefined
+      ? Boolean(req.body.only_database_movies)
+      : false;
+
+    if (!query) {
+      const err = new Error("Vui long nhap nhu cau xem phim.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    let user = null;
+    if (req.headers.authorization) {
+      user = await getUserFromToken(req);
+    }
+
+    let tmdbEnabled = true;
+    try {
+      tmdbEnabled = await isTmdbEnabled();
+    } catch (_error) {
+      tmdbEnabled = true;
+    }
+
+    const onlyDatabaseMovies = requestedOnlyDatabaseMovies || !tmdbEnabled;
+    let payload = {
+      normalized_query: query,
+      detected_filters: {},
+      recommended_movies: [],
+      only_database_movies: onlyDatabaseMovies,
+    };
+    let aiMovies = [];
+    let finalMovies = [];
+    let source = "ai_service";
+    let warning = !tmdbEnabled
+      ? "TMDB dang tat, he thong chi tra phim co trong database noi bo."
+      : "";
+    let explanation = "";
+
+    const aiReady = typeof checkAiRecommendationServiceHealth === "function"
+      ? await checkAiRecommendationServiceHealth().catch(() => false)
+      : true;
+
+    if (!aiReady) {
+      return this.buildEmptyDirectRecommendationResult({
+        query,
+        onlyDatabaseMovies,
+        warning: warning
+          ? `${warning} AI service tam thoi chua san sang, vui long thu lai sau.`
+          : "AI service tam thoi chua san sang, vui long thu lai sau.",
+      });
+    }
+
+    try {
+      const aiResult = await callAiRecommendationService({
+        query,
+        topN,
+        userId: user?.id || null,
+        onlyDatabaseMovies,
+      });
+
+      payload = aiResult?.payload || payload;
+      aiMovies = Array.isArray(aiResult?.movies) ? aiResult.movies : [];
+      finalMovies = aiMovies;
+    } catch (err) {
+      console.warn("[AI DIRECT] Service fallback:", err.message);
+
+      return this.buildEmptyDirectRecommendationResult({
+        query,
+        onlyDatabaseMovies,
+        warning: warning
+          ? `${warning} AI service tam thoi gap loi, dang tra ket qua rong an toan.`
+          : "AI service tam thoi gap loi, dang tra ket qua rong an toan.",
+      });
+    }
+
+    if (onlyDatabaseMovies && user?.id) {
+      try {
+        const profile = await buildBehaviorProfileQuery(user.id);
+        if (profile?.hasSignals) {
+          const behaviorMovies = await getBehaviorRecommendationMovies({
+            profile,
+            limit: topN,
+            aiMovies,
+            excludeMovieIds: profile.seedMovieIds,
+          });
+
+          if (behaviorMovies.length) {
+            finalMovies = behaviorMovies;
+            source = "chat_behavior";
+            explanation = "Da rerank ket qua AI theo lich su xem, yeu thich, danh gia va tim kiem cua ban.";
+          }
+        }
+      } catch (err) {
+        console.warn("[AI DIRECT] Behavior rerank fallback:", err.message);
+      }
+    }
+
+    if (onlyDatabaseMovies && finalMovies.length === 0) {
+      let fallbackResult = null;
+
+      try {
+        fallbackResult = await getChatRecommendationMovies({
+          query,
+          userId: user?.id || null,
+          currentMovieId: null,
+          limit: topN,
+        });
+      } catch (err) {
+        console.warn("[AI DIRECT] Empty fallback:", err.message);
+
+        return this.buildEmptyDirectRecommendationResult({
+          query,
+          onlyDatabaseMovies,
+          warning: warning
+            ? `${warning} AI tam thoi chua co ket qua phu hop.`
+            : "AI tam thoi chua co ket qua phu hop.",
+          explanation,
+        });
+      }
+
+      return {
+        success: true,
+        source: fallbackResult.source || "fallback",
+        query,
+        normalizedQuery: fallbackResult.normalizedQuery || query,
+        normalized_query: fallbackResult.normalizedQuery || query,
+        detectedFilters: fallbackResult.detectedFilters || {},
+        detected_filters: fallbackResult.detectedFilters || {},
+        warning: fallbackResult.warning || warning,
+        explanation: fallbackResult.explanation || explanation,
+        only_database_movies: true,
+        recommended_movies: fallbackResult.items,
+        movies: fallbackResult.items,
+        items: fallbackResult.items,
+      };
+    }
+
+    return {
+      success: true,
+      source,
+      query,
+      normalizedQuery: payload.normalized_query || query,
+      normalized_query: payload.normalized_query || query,
+      detectedFilters: payload.detected_filters || {},
+      detected_filters: payload.detected_filters || {},
+      warning,
+      explanation,
+      only_database_movies:
+        typeof payload.only_database_movies === "boolean"
+          ? payload.only_database_movies || onlyDatabaseMovies
+          : onlyDatabaseMovies,
+      recommended_movies: Array.isArray(payload.recommended_movies) ? payload.recommended_movies : [],
+      movies: finalMovies,
+      items: finalMovies,
+    };
+  },
+
   async getMovieRecommendations(req) {
     const query = String(req.body?.query || "").replace(/[<>]/g, "").trim().slice(0, 240);
     const topN = Math.max(1, Math.min(Number(req.body?.top_n || req.body?.limit || 10), 20));
@@ -76,7 +261,7 @@ export const createAiService = ({
         success: true,
         source: hybridResult.hasTmdbFallback ? "hybrid" : "fallback",
         warning: hybridResult.hasTmdbFallback
-          ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn."
+          ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon."
           : "AI chat tam thoi gap loi, dang dung phim noi bo san co trong he thong.",
         query,
         normalizedQuery: query,
@@ -113,9 +298,9 @@ export const createAiService = ({
         source: hybridResult.hasTmdbFallback ? "hybrid" : "fallback",
         personalized: false,
         warning: hybridResult.hasTmdbFallback
-          ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn."
+          ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon."
           : "Dang dung phim noi bat vi ban chua dang nhap.",
-        summary: "Dựa trên sở thích và hoạt động gần đây của bạn.",
+        summary: "Dua tren so thich va hoat dong gan day cua ban.",
         preferenceQuery: "",
         activity: {
           watchCount: 0,
@@ -152,11 +337,11 @@ export const createAiService = ({
           source: hybridResult.hasTmdbFallback ? "hybrid" : behaviorMovies.length ? "behavior" : "fallback",
           personalized: behaviorMovies.length,
           warning: hybridResult.hasTmdbFallback
-            ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn."
+            ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon."
             : behaviorMovies.length
               ? "Dang dung xep hang tu hanh vi that trong he thong."
               : "Chua du du lieu ca nhan hoa, dang dung phim noi bat.",
-          summary: "Dựa trên sở thích và hoạt động gần đây của bạn.",
+          summary: "Dua tren so thich va hoat dong gan day cua ban.",
           preferenceQuery: "",
           activity: profile.activity,
           topGenres: profile.topGenres,
@@ -166,6 +351,14 @@ export const createAiService = ({
           topSearchTerms: profile.topSearchTerms,
           movies: hybridResult.items,
         };
+      }
+
+      const aiReady = typeof checkAiRecommendationServiceHealth === "function"
+        ? await checkAiRecommendationServiceHealth().catch(() => false)
+        : true;
+
+      if (!aiReady) {
+        throw new Error("AI service tam thoi chua san sang.");
       }
 
       const { payload, movies } = await callAiRecommendationService({
@@ -202,9 +395,9 @@ export const createAiService = ({
           source: fallbackHybridResult.hasTmdbFallback ? "hybrid" : "fallback",
           personalized: false,
           warning: fallbackHybridResult.hasTmdbFallback
-            ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn."
+            ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon."
             : "AI chua tim duoc phim khop ho so cua ban, dang dung phim noi bat.",
-          summary: "Dựa trên sở thích và hoạt động gần đây của bạn.",
+          summary: "Dua tren so thich va hoat dong gan day cua ban.",
           preferenceQuery: profile.query,
           activity: profile.activity,
           topGenres: profile.topGenres,
@@ -222,7 +415,7 @@ export const createAiService = ({
         success: true,
         source: hybridResult.hasTmdbFallback ? "hybrid" : behaviorMovies.length ? "behavior" : "ai",
         personalized: true,
-        summary: "Dựa trên sở thích và hoạt động gần đây của bạn.",
+        summary: "Dua tren so thich va hoat dong gan day cua ban.",
         preferenceQuery: profile.query,
         activity: profile.activity,
         topGenres: profile.topGenres,
@@ -232,7 +425,7 @@ export const createAiService = ({
         topSearchTerms: profile.topSearchTerms,
         normalizedQuery: payload.normalized_query || profile.query,
         detectedFilters: payload.detected_filters || {},
-        warning: hybridResult.hasTmdbFallback ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn." : "",
+        warning: hybridResult.hasTmdbFallback ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon." : "",
         movies: hybridResult.items,
       };
     } catch (err) {
@@ -260,11 +453,11 @@ export const createAiService = ({
         source: hybridResult.hasTmdbFallback ? "hybrid" : behaviorMovies.length ? "behavior" : "fallback",
         personalized: behaviorMovies.length,
         warning: hybridResult.hasTmdbFallback
-          ? "Một số gợi ý được bổ sung từ TMDB để danh sách phong phú hơn."
+          ? "Mot so goi y duoc bo sung tu TMDB de danh sach phong phu hon."
           : behaviorMovies.length
             ? "AI service tam thoi chua san sang, dang dung goi y tu hanh vi that."
             : "Chua the tao goi y ca nhan luc nay, dang dung phim noi bat.",
-        summary: "Dựa trên sở thích và hoạt động gần đây của bạn.",
+        summary: "Dua tren so thich va hoat dong gan day cua ban.",
         preferenceQuery: "",
         activity:
           profile?.activity || {

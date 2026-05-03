@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Clock3, Flame, Sparkles, Star } from 'lucide-react';
 import Slider from '../components/ui/Slider';
@@ -7,13 +7,16 @@ import MovieGrid from '../components/movie/MovieGrid';
 import MovieCard from '../components/movie/MovieCard';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import TMDBService from '../services/tmdb.service';
+import * as SupabaseService from '../services/supabase.service';
 import { usePopularMovies, useTopRatedMovies, useTrendingMovies } from '../hooks/useTMDB';
 import { useWatchHistory } from '../hooks/useWatchHistory';
 import { useAuth } from '../hooks/useAuth';
-import CatalogService, { type CatalogMovie, type MovieRanking } from '../services/catalog.service';
+import CatalogService, { type CatalogMovie, type MovieRanking, type SimilarMovie } from '../services/catalog.service';
 import { getApiBaseUrl } from '../services/api';
 import { supabase } from '../lib/supabase';
 import type { SlideData } from '../data/mockData';
+import { USE_TMDB } from '../config/featureFlags';
+import { formatRecommendationReasonSentence, formatRecommendationReasonText } from '../utils/recommendationReason';
 
 type HomeRecommendation = {
   movieId: number | null;
@@ -40,6 +43,7 @@ type PersonalizedRecommendationMovie = {
   average_rating: number;
   score: number;
   reason: string;
+  reason_tags?: string[];
   availability?: 'internal' | 'tmdb_only';
   action_type?: 'watch_now' | 'view_detail';
 };
@@ -74,10 +78,41 @@ function buildContinueWatchingHref(movie: {
   return movie.episodeId ? `${basePath}?episodeId=${movie.episodeId}` : basePath;
 }
 
+function areTmdbMappingsEqual(
+  current: Record<number, number>,
+  next: Record<number, number>
+) {
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+
+  if (currentKeys.length !== nextKeys.length) return false;
+
+  return nextKeys.every((key) => current[Number(key)] === next[Number(key)]);
+}
+
 function getContinueWatchingImage(pathOrUrl: string | null | undefined) {
   if (!pathOrUrl) return TMDBService.getTMDBFallbackImage('poster');
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  if (pathOrUrl.startsWith('/')) return pathOrUrl;
   return TMDBService.getTMDBImageUrl(pathOrUrl, 'w500', 'poster');
+}
+
+function resolvePosterImage(pathOrUrl: string | null | undefined) {
+  if (!pathOrUrl) return TMDBService.getTMDBFallbackImage('poster');
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  if (pathOrUrl.startsWith('/')) return pathOrUrl;
+  return TMDBService.getTMDBImageUrl(pathOrUrl, 'w500', 'poster');
+}
+
+function catalogMovieToSlide(movie: CatalogMovie): SlideData {
+  return {
+    id: movie.tmdb_id ?? movie.id,
+    title: movie.title,
+    description: movie.overview || 'Khám phá phim trong thư viện nội bộ của Thêm Phim.',
+    image: TMDBService.getTMDBImageUrl(movie.backdrop_url || movie.backdrop_path || movie.poster_url || movie.poster_path, 'w1280', 'backdrop'),
+    rating: movie.vote_average || 0,
+    year: movie.release_year || undefined,
+  };
 }
 
 function rankingToRecommendation(movie: MovieRanking): HomeRecommendation | null {
@@ -99,8 +134,42 @@ function rankingToRecommendation(movie: MovieRanking): HomeRecommendation | null
   };
 }
 
+function similarMovieToRecommendation(movie: SimilarMovie): HomeRecommendation | null {
+  const movieId = typeof movie.id === 'number' ? movie.id : null;
+  const tmdbId = typeof movie.tmdb_id === 'number' ? movie.tmdb_id : null;
+
+  if (!movieId && !tmdbId) return null;
+
+  return {
+    movieId,
+    tmdbId,
+    href: buildMovieHref(movieId, tmdbId),
+    title: movie.title,
+    posterPath: movie.poster_path,
+    posterUrl: movie.poster_url,
+    rating: 0,
+    overview: formatRecommendationReasonSentence(movie.reason_tags, 'Phim tương tự với nội dung bạn vừa xem.'),
+    rankingScore: movie.similarity_score,
+  };
+}
+
+function getHighRatingThreshold(values: Array<{ rating: number }>) {
+  const maxRating = values.reduce((current, item) => Math.max(current, Number(item.rating) || 0), 0);
+  return maxRating > 5 ? 8 : 4;
+}
+
+function getRatingSortTime(value: { updated_at?: string; created_at?: string }) {
+  const timestamp = Date.parse(value.updated_at || value.created_at || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function apiToRecommendation(movie: PersonalizedRecommendationMovie): HomeRecommendation | null {
-  const movieId = typeof movie.movie_id === 'number' ? movie.movie_id : null;
+  const movieId =
+    typeof movie.internal_movie_id === 'number' && movie.internal_movie_id > 0
+      ? movie.internal_movie_id
+      : typeof movie.movie_id === 'number'
+        ? movie.movie_id
+        : null;
   const tmdbId = typeof movie.tmdb_id === 'number' ? movie.tmdb_id : null;
 
   if (!movieId && !tmdbId) return null;
@@ -113,7 +182,7 @@ function apiToRecommendation(movie: PersonalizedRecommendationMovie): HomeRecomm
     posterPath: movie.poster_path,
     posterUrl: movie.poster_url,
     rating: movie.average_rating || 0,
-    overview: movie.reason || 'Gợi ý dựa trên hành vi xem phim của bạn.',
+    overview: formatRecommendationReasonText(movie.reason, movie.reason_tags, 'Gợi ý dựa trên hành vi xem phim của bạn.'),
     rankingScore: movie.score || 0,
   };
 }
@@ -131,6 +200,18 @@ const HomePageTMDB: React.FC = () => {
   const [recommendationsError, setRecommendationsError] = useState<string | null>(null);
   const [recommendationsPersonalized, setRecommendationsPersonalized] = useState(false);
   const [recommendationsSummary, setRecommendationsSummary] = useState<string | null>(null);
+  const [becauseYouWatched, setBecauseYouWatched] = useState<HomeRecommendation[]>([]);
+  const [becauseYouWatchedSeedTitle, setBecauseYouWatchedSeedTitle] = useState<string | null>(null);
+  const [becauseYouWatchedLoading, setBecauseYouWatchedLoading] = useState(false);
+  const [becauseYouWatchedError, setBecauseYouWatchedError] = useState<string | null>(null);
+  const [favoritesRecommendations, setFavoritesRecommendations] = useState<HomeRecommendation[]>([]);
+  const [favoritesSeedTitle, setFavoritesSeedTitle] = useState<string | null>(null);
+  const [favoritesRecommendationsLoading, setFavoritesRecommendationsLoading] = useState(false);
+  const [favoritesRecommendationsError, setFavoritesRecommendationsError] = useState<string | null>(null);
+  const [ratingsRecommendations, setRatingsRecommendations] = useState<HomeRecommendation[]>([]);
+  const [ratingsSeedTitle, setRatingsSeedTitle] = useState<string | null>(null);
+  const [ratingsRecommendationsLoading, setRatingsRecommendationsLoading] = useState(false);
+  const [posterByInternalMovieId, setPosterByInternalMovieId] = useState<Record<number, string>>({});
   const [internalMovieIdsByTmdb, setInternalMovieIdsByTmdb] = useState<Record<number, number>>({});
   const {
     movies: trendingMovies,
@@ -147,7 +228,22 @@ const HomePageTMDB: React.FC = () => {
     loading: topRatedLoading,
     error: topRatedError,
   } = useTopRatedMovies(1);
-  const { continueWatching, loading: historyLoading, error: historyError } = useWatchHistory();
+  const { historyItems, continueWatching, loading: historyLoading, error: historyError } = useWatchHistory();
+
+  const watchedEnoughMovieIds = useMemo(
+    () =>
+      new Set(
+        historyItems
+          .filter((movie) => movie.progressPercent >= 90 && movie.internalMovieId > 0)
+          .map((movie) => movie.internalMovieId)
+      ),
+    [historyItems]
+  );
+
+  const becauseYouWatchedSeed = useMemo(
+    () => continueWatching.find((movie) => movie.internalMovieId > 0) || null,
+    [continueWatching]
+  );
 
   const visibleTmdbIds = useMemo(
     () =>
@@ -162,6 +258,19 @@ const HomePageTMDB: React.FC = () => {
         ])
       ).filter((movieId) => Number.isInteger(movieId) && movieId > 0),
     [continueWatching, popularMovies, topRatedMovies]
+  );
+
+  const recommendationMoviesNeedingPoster = useMemo(
+    () =>
+      [
+        ...recommendations,
+        ...becauseYouWatched,
+        ...favoritesRecommendations,
+        ...ratingsRecommendations,
+      ]
+        .map((movie) => movie.movieId)
+        .filter((movieId): movieId is number => typeof movieId === 'number' && movieId > 0),
+    [becauseYouWatched, favoritesRecommendations, ratingsRecommendations, recommendations]
   );
 
   useEffect(() => {
@@ -306,9 +415,272 @@ const HomePageTMDB: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
 
+    const loadRecommendationPosters = async () => {
+      const movieIds = Array.from(new Set(recommendationMoviesNeedingPoster));
+
+      if (movieIds.length === 0) {
+        if (isMounted) {
+          setPosterByInternalMovieId({});
+        }
+        return;
+      }
+
+      const movieResults = await Promise.all(
+        movieIds.map((movieId) => CatalogService.getMovieByInternalId(movieId))
+      );
+      if (!isMounted) return;
+
+      const nextPosterMap = movieResults.reduce<Record<number, string>>((acc, result, index) => {
+        const movie = result.movie;
+        const fallbackMovieId = movieIds[index];
+        const poster = movie ? resolvePosterImage(movie.poster_url || movie.poster_path) : null;
+
+        if (fallbackMovieId > 0 && poster) {
+          acc[fallbackMovieId] = poster;
+        }
+        return acc;
+      }, {});
+
+      setPosterByInternalMovieId(nextPosterMap);
+    };
+
+    void loadRecommendationPosters();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [recommendationMoviesNeedingPoster]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadBecauseYouWatched = async () => {
+      if (!user || !becauseYouWatchedSeed?.internalMovieId) {
+        if (isMounted) {
+          setBecauseYouWatched([]);
+          setBecauseYouWatchedSeedTitle(null);
+          setBecauseYouWatchedError(null);
+          setBecauseYouWatchedLoading(false);
+        }
+        return;
+      }
+
+      setBecauseYouWatchedLoading(true);
+      setBecauseYouWatchedError(null);
+
+      try {
+        const result = await CatalogService.getSimilarMoviesByInternalId(becauseYouWatchedSeed.internalMovieId, 8);
+        const items = result.items
+          .filter((movie) => movie.id !== becauseYouWatchedSeed.internalMovieId)
+          .filter((movie) => !watchedEnoughMovieIds.has(movie.id))
+          .map((movie) => similarMovieToRecommendation(movie))
+          .filter((movie): movie is HomeRecommendation => movie !== null)
+          .slice(0, 6);
+
+        if (!isMounted) return;
+
+        setBecauseYouWatched(items);
+        setBecauseYouWatchedSeedTitle(becauseYouWatchedSeed.title);
+        setBecauseYouWatchedError(result.error || null);
+      } catch (error) {
+        if (!isMounted) return;
+        setBecauseYouWatched([]);
+        setBecauseYouWatchedSeedTitle(becauseYouWatchedSeed.title);
+        setBecauseYouWatchedError(error instanceof Error ? error.message : 'Khong the tai goi y tuong tu luc nay.');
+      } finally {
+        if (isMounted) {
+          setBecauseYouWatchedLoading(false);
+        }
+      }
+    };
+
+    void loadBecauseYouWatched();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [becauseYouWatchedSeed, user, watchedEnoughMovieIds]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFavoriteRecommendations = async () => {
+      if (!user) {
+        if (isMounted) {
+          setFavoritesRecommendations([]);
+          setFavoritesSeedTitle(null);
+          setFavoritesRecommendationsError(null);
+          setFavoritesRecommendationsLoading(false);
+        }
+        return;
+      }
+
+      setFavoritesRecommendationsLoading(true);
+      setFavoritesRecommendationsError(null);
+
+      try {
+        const { movieIds, error } = await SupabaseService.getWatchlist(user.id);
+
+        if (error) {
+          throw new Error(error);
+        }
+
+        if (!movieIds.length) {
+          if (isMounted) {
+            setFavoritesRecommendations([]);
+            setFavoritesSeedTitle(null);
+          }
+          return;
+        }
+
+        const favoriteCatalogMovies = await CatalogService.getMoviesByInternalIds(movieIds.slice(0, 12));
+        const movieById = new Map(favoriteCatalogMovies.map((movie) => [movie.id, movie]));
+        const seedMovie = movieIds
+          .map((movieId) => movieById.get(movieId))
+          .find((movie) => movie && movie.is_active !== false);
+
+        if (!seedMovie) {
+          if (isMounted) {
+            setFavoritesRecommendations([]);
+            setFavoritesSeedTitle(null);
+          }
+          return;
+        }
+
+        const result = await CatalogService.getSimilarMoviesByInternalId(seedMovie.id, 8);
+        const items = result.items
+          .filter((movie) => movie.id !== seedMovie.id)
+          .filter((movie) => !watchedEnoughMovieIds.has(movie.id))
+          .map((movie) => similarMovieToRecommendation(movie))
+          .filter((movie): movie is HomeRecommendation => movie !== null)
+          .slice(0, 6);
+
+        if (!isMounted) return;
+
+        setFavoritesRecommendations(items);
+        setFavoritesSeedTitle(items.length > 0 ? seedMovie.title : null);
+        setFavoritesRecommendationsError(result.error || null);
+      } catch (error) {
+        if (!isMounted) return;
+        setFavoritesRecommendations([]);
+        setFavoritesSeedTitle(null);
+        setFavoritesRecommendationsError(error instanceof Error ? error.message : 'Khong the tai goi y tu favorite luc nay.');
+      } finally {
+        if (isMounted) {
+          setFavoritesRecommendationsLoading(false);
+        }
+      }
+    };
+
+    void loadFavoriteRecommendations();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, watchedEnoughMovieIds]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRatingRecommendations = async () => {
+      if (!user) {
+        if (isMounted) {
+          setRatingsRecommendations([]);
+          setRatingsSeedTitle(null);
+          setRatingsRecommendationsLoading(false);
+        }
+        return;
+      }
+
+      setRatingsRecommendationsLoading(true);
+
+      try {
+        const { ratings, error } = await SupabaseService.getUserRatings(user.id, 20);
+
+        if (error) {
+          throw new Error(error);
+        }
+
+        if (!ratings.length) {
+          if (isMounted) {
+            setRatingsRecommendations([]);
+            setRatingsSeedTitle(null);
+          }
+          return;
+        }
+
+        const highRatingThreshold = getHighRatingThreshold(ratings);
+        const highRatings = ratings
+          .filter((item) => Number(item.rating) >= highRatingThreshold)
+          .sort((a, b) => {
+            const ratingDiff = Number(b.rating) - Number(a.rating);
+            if (ratingDiff !== 0) return ratingDiff;
+            return getRatingSortTime(b) - getRatingSortTime(a);
+          });
+
+        if (!highRatings.length) {
+          if (isMounted) {
+            setRatingsRecommendations([]);
+            setRatingsSeedTitle(null);
+          }
+          return;
+        }
+
+        const ratingMovieIds = Array.from(new Set(highRatings.map((item) => item.movie_id))).slice(0, 12);
+        const ratedCatalogMovies = await CatalogService.getMoviesByInternalIds(ratingMovieIds);
+        const movieById = new Map(ratedCatalogMovies.map((movie) => [movie.id, movie]));
+        const seedMovie = highRatings
+          .map((item) => movieById.get(item.movie_id))
+          .find((movie) => movie && movie.is_active !== false);
+
+        if (!seedMovie) {
+          if (isMounted) {
+            setRatingsRecommendations([]);
+            setRatingsSeedTitle(null);
+          }
+          return;
+        }
+
+        const result = await CatalogService.getSimilarMoviesByInternalId(seedMovie.id, 8);
+        const items = result.items
+          .filter((movie) => movie.id !== seedMovie.id)
+          .filter((movie) => !watchedEnoughMovieIds.has(movie.id))
+          .map((movie) => similarMovieToRecommendation(movie))
+          .filter((movie): movie is HomeRecommendation => movie !== null)
+          .slice(0, 6);
+
+        if (!isMounted) return;
+
+        setRatingsRecommendations(items);
+        setRatingsSeedTitle(items.length > 0 ? seedMovie.title : null);
+      } catch (_error) {
+        if (!isMounted) return;
+        setRatingsRecommendations([]);
+        setRatingsSeedTitle(null);
+      } finally {
+        if (isMounted) {
+          setRatingsRecommendationsLoading(false);
+        }
+      }
+    };
+
+    void loadRatingRecommendations();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user, watchedEnoughMovieIds]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     const loadInternalMovieMappings = async () => {
       if (visibleTmdbIds.length === 0) {
-        if (isMounted) setInternalMovieIdsByTmdb({});
+        if (isMounted) {
+          setInternalMovieIdsByTmdb((current) =>
+            Object.keys(current).length === 0 ? current : {}
+          );
+        }
         return;
       }
 
@@ -322,7 +694,9 @@ const HomePageTMDB: React.FC = () => {
         return acc;
       }, {});
 
-      setInternalMovieIdsByTmdb(nextMappings);
+      setInternalMovieIdsByTmdb((current) =>
+        areTmdbMappingsEqual(current, nextMappings) ? current : nextMappings
+      );
     };
 
     void loadInternalMovieMappings();
@@ -332,17 +706,19 @@ const HomePageTMDB: React.FC = () => {
     };
   }, [visibleTmdbIds]);
 
-  const featuredSlides: SlideData[] = trendingMovies.slice(0, 5).map((movie) => ({
-    id: movie.id,
-    title: movie.title,
-    description: movie.overview || 'Khám phá thông tin phim, diễn viên và trailer mới nhất.',
-    image: TMDBService.getTMDBImageUrl(movie.backdrop_path || movie.poster_path, 'w1280', 'backdrop'),
-    rating: TMDBService.formatRating(movie.vote_average),
-    year: movie.release_date ? new Date(movie.release_date).getFullYear() : undefined,
-  }));
+  const featuredSlides: SlideData[] = USE_TMDB
+    ? trendingMovies.slice(0, 5).map((movie) => ({
+        id: movie.id,
+        title: movie.title,
+        description: movie.overview || 'Khám phá thông tin phim, diễn viên và trailer mới nhất.',
+        image: TMDBService.getTMDBImageUrl(movie.backdrop_path || movie.poster_path, 'w1280', 'backdrop'),
+        rating: TMDBService.formatRating(movie.vote_average),
+        year: movie.release_date ? new Date(movie.release_date).getFullYear() : undefined,
+      }))
+    : internalCatalogMovies.slice(0, 5).map(catalogMovieToSlide);
 
-  const pageLoading = trendingLoading && popularLoading && topRatedLoading;
-  const pageError = trendingError || popularError || topRatedError;
+  const pageLoading = USE_TMDB ? trendingLoading && popularLoading && topRatedLoading : false;
+  const pageError = USE_TMDB ? trendingError || popularError || topRatedError : null;
   const recommendationBadgeLabel = recommendationsPersonalized
     ? 'Gợi ý từ AI theo lịch sử xem'
     : 'Danh sách thay thế từ thư viện nổi bật';
@@ -466,6 +842,146 @@ const HomePageTMDB: React.FC = () => {
           </section>
         )}
 
+        {user && becauseYouWatchedSeedTitle && (becauseYouWatchedLoading || becauseYouWatched.length > 0 || becauseYouWatchedError) ? (
+          <section>
+            <SectionTitle
+              title={`Vì bạn đã xem ${becauseYouWatchedSeedTitle}`}
+              description="Những phim nội bộ có nội dung hoặc chủ đề gần với bộ phim bạn đang theo dõi."
+              showViewAll={false}
+            />
+
+            {becauseYouWatchedLoading ? (
+              <div className="flex justify-center rounded-[2rem] border border-gray-800 bg-gray-950/70 py-14">
+                <LoadingSpinner />
+              </div>
+            ) : becauseYouWatched.length === 0 ? (
+              becauseYouWatchedError ? (
+                <div className="rounded-[2rem] border border-yellow-500/20 bg-gray-950 p-6 text-sm leading-6 text-gray-300">
+                  Chua the tai goi y tuong tu luc nay: {becauseYouWatchedError}
+                </div>
+              ) : null
+            ) : (
+              <>
+                {becauseYouWatchedError ? (
+                  <div className="mb-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+                    Mot so goi y tuong tu dang duoc hien thi tu cache san co: {becauseYouWatchedError}
+                  </div>
+                ) : null}
+                <MovieGrid>
+                  {becauseYouWatched.map((movie, index) => (
+                    <MovieCard
+                      key={`${movie.movieId ?? 'tmdb'}-${movie.tmdbId ?? index}`}
+                      id={movie.movieId ?? movie.tmdbId ?? index}
+                      internalMovieId={movie.movieId}
+                      href={movie.href}
+                      title={movie.title}
+                      image={posterByInternalMovieId[movie.movieId ?? -1] || resolvePosterImage(movie.posterUrl || movie.posterPath)}
+                      quality="Vi ban da xem"
+                      type="Tuong tu"
+                      rating={movie.rating}
+                      overview={movie.overview}
+                      showProgress={false}
+                      analytics={{
+                        sourcePage: '/',
+                        sourceModule: 'home_because_you_watched',
+                        recommendationSource: 'similar_internal',
+                        rankPosition: index + 1,
+                      }}
+                    />
+                  ))}
+                </MovieGrid>
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {user && favoritesSeedTitle && (favoritesRecommendationsLoading || favoritesRecommendations.length > 0) ? (
+          <section>
+            <SectionTitle
+              title="Dựa trên phim bạn yêu thích"
+              description={`Gợi ý phim nội bộ có màu sắc gần với "${favoritesSeedTitle}" trong danh sách yêu thích của bạn.`}
+              showViewAll={false}
+            />
+
+            {favoritesRecommendationsLoading ? (
+              <div className="flex justify-center rounded-[2rem] border border-gray-800 bg-gray-950/70 py-14">
+                <LoadingSpinner />
+              </div>
+            ) : favoritesRecommendations.length > 0 ? (
+              <>
+                {favoritesRecommendationsError ? (
+                  <div className="mb-4 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-100">
+                    Mot so goi y tu favorite dang duoc hien thi tu du lieu san co: {favoritesRecommendationsError}
+                  </div>
+                ) : null}
+                <MovieGrid>
+                  {favoritesRecommendations.map((movie, index) => (
+                    <MovieCard
+                      key={`${movie.movieId ?? 'tmdb'}-${movie.tmdbId ?? index}`}
+                      id={movie.movieId ?? movie.tmdbId ?? index}
+                      internalMovieId={movie.movieId}
+                      href={movie.href}
+                      title={movie.title}
+                      image={posterByInternalMovieId[movie.movieId ?? -1] || resolvePosterImage(movie.posterUrl || movie.posterPath)}
+                      quality="Yeu thich"
+                      type="Tuong tu"
+                      rating={movie.rating}
+                      overview={movie.overview}
+                      showProgress={false}
+                      analytics={{
+                        sourcePage: '/',
+                        sourceModule: 'home_based_on_favorites',
+                        recommendationSource: 'favorite_similar_internal',
+                        rankPosition: index + 1,
+                      }}
+                    />
+                  ))}
+                </MovieGrid>
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
+        {user && ratingsSeedTitle && (ratingsRecommendationsLoading || ratingsRecommendations.length > 0) ? (
+          <section>
+            <SectionTitle
+              title="Dựa trên đánh giá của bạn"
+              description={`Gợi ý từ những phim bạn đã chấm điểm cao, bắt đầu từ "${ratingsSeedTitle}".`}
+              showViewAll={false}
+            />
+
+            {ratingsRecommendationsLoading ? (
+              <div className="flex justify-center rounded-[2rem] border border-gray-800 bg-gray-950/70 py-14">
+                <LoadingSpinner />
+              </div>
+            ) : ratingsRecommendations.length > 0 ? (
+              <MovieGrid>
+                {ratingsRecommendations.map((movie, index) => (
+                  <MovieCard
+                    key={`${movie.movieId ?? 'tmdb'}-${movie.tmdbId ?? index}`}
+                    id={movie.movieId ?? movie.tmdbId ?? index}
+                    internalMovieId={movie.movieId}
+                    href={movie.href}
+                    title={movie.title}
+                    image={posterByInternalMovieId[movie.movieId ?? -1] || resolvePosterImage(movie.posterUrl || movie.posterPath)}
+                    quality="Danh gia cao"
+                    type="Tuong tu"
+                    rating={movie.rating}
+                    overview={movie.overview}
+                    showProgress={false}
+                    analytics={{
+                      sourcePage: '/',
+                      sourceModule: 'home_based_on_ratings',
+                      recommendationSource: 'rating_similar_internal',
+                      rankPosition: index + 1,
+                    }}
+                  />
+                ))}
+              </MovieGrid>
+            ) : null}
+          </section>
+        ) : null}
+
         <section>
           <SectionTitle
             title="Gợi ý cho bạn"
@@ -519,7 +1035,7 @@ const HomePageTMDB: React.FC = () => {
                     internalMovieId={movie.movieId}
                     href={movie.href}
                     title={movie.title}
-                    image={movie.posterUrl || TMDBService.getTMDBImageUrl(movie.posterPath, 'w500', 'poster')}
+                    image={posterByInternalMovieId[movie.movieId ?? -1] || resolvePosterImage(movie.posterUrl || movie.posterPath)}
                     quality={recommendationsPersonalized ? 'AI' : `#${index + 1}`}
                     type={recommendationsPersonalized ? 'Cho bạn' : 'Nổi bật'}
                     rating={movie.rating}
@@ -633,53 +1149,57 @@ const HomePageTMDB: React.FC = () => {
           )}
         </section>
 
-        <section>
-          <SectionTitle title="Phim phổ biến" description="Những bộ phim đang được nhiều người quan tâm." showViewAll={false} />
-          <MovieGrid>
-            {popularMovies.slice(0, 12).map((movie) => (
-              <MovieCard
-                key={movie.id}
-                id={movie.id}
-                internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
-                title={movie.title}
-                image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster')}
-                quality={movie.vote_average >= 7 ? '4K' : 'HD'}
-                type="Phim"
-                rating={movie.vote_average}
-                year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
-                overview={movie.overview}
-                analytics={{
-                  sourcePage: '/',
-                  sourceModule: 'home_popular',
-                }}
-              />
-            ))}
-          </MovieGrid>
-        </section>
+        {USE_TMDB && (
+          <>
+            <section>
+              <SectionTitle title="Phim phổ biến" description="Những bộ phim đang được nhiều người quan tâm." showViewAll={false} />
+              <MovieGrid>
+                {popularMovies.slice(0, 12).map((movie) => (
+                  <MovieCard
+                    key={movie.id}
+                    id={movie.id}
+                    internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
+                    title={movie.title}
+                    image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster')}
+                    quality={movie.vote_average >= 7 ? '4K' : 'HD'}
+                    type="Phim"
+                    rating={movie.vote_average}
+                    year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
+                    overview={movie.overview}
+                    analytics={{
+                      sourcePage: '/',
+                      sourceModule: 'home_popular',
+                    }}
+                  />
+                ))}
+              </MovieGrid>
+            </section>
 
-        <section>
-          <SectionTitle title="Được đánh giá cao" description="Các bộ phim có điểm đánh giá nổi bật để bạn tham khảo." showViewAll={false} />
-          <MovieGrid>
-            {topRatedMovies.slice(0, 12).map((movie) => (
-              <MovieCard
-                key={movie.id}
-                id={movie.id}
-                internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
-                title={movie.title}
-                image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster')}
-                quality="HD"
-                type="Đánh giá cao"
-                rating={movie.vote_average}
-                year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
-                overview={movie.overview}
-                analytics={{
-                  sourcePage: '/',
-                  sourceModule: 'home_top_rated',
-                }}
-              />
-            ))}
-          </MovieGrid>
-        </section>
+            <section>
+              <SectionTitle title="Được đánh giá cao" description="Các bộ phim có điểm đánh giá nổi bật để bạn tham khảo." showViewAll={false} />
+              <MovieGrid>
+                {topRatedMovies.slice(0, 12).map((movie) => (
+                  <MovieCard
+                    key={movie.id}
+                    id={movie.id}
+                    internalMovieId={internalMovieIdsByTmdb[movie.id] ?? null}
+                    title={movie.title}
+                    image={TMDBService.getTMDBImageUrl(movie.poster_path, 'w500', 'poster')}
+                    quality="HD"
+                    type="Đánh giá cao"
+                    rating={movie.vote_average}
+                    year={movie.release_date ? new Date(movie.release_date).getFullYear().toString() : ''}
+                    overview={movie.overview}
+                    analytics={{
+                      sourcePage: '/',
+                      sourceModule: 'home_top_rated',
+                    }}
+                  />
+                ))}
+              </MovieGrid>
+            </section>
+          </>
+        )}
 
         <section className="rounded-[2rem] border border-white/10 bg-gray-950 p-8">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

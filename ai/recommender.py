@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import unicodedata
 import math
@@ -40,7 +40,7 @@ GENRE_ALIASES = {
 
 COUNTRY_LANGUAGE_ALIASES = {
     "Korean": {
-        "aliases": ["han quoc", "hàn quốc", "korean", "korea", "south korea"],
+        "aliases": ["han", "hàn", "han quoc", "hàn quốc", "korean", "korea", "south korea"],
         "countries": ["south korea", "korea"],
         "languages": ["ko"],
     },
@@ -75,6 +75,92 @@ COUNTRY_LANGUAGE_ALIASES = {
         "languages": ["hi"],
     },
 }
+
+QUERY_THEME_RULES = [
+    {
+        "label": "naruto",
+        "aliases": ["naruto"],
+        "tokens": [
+            "anime", "japanese animation", "animation", "japan", "japanese",
+            "action", "adventure", "ninja", "shounen", "super power", "friendship", "martial arts"
+        ],
+        "preferred_genres": ["Animation", "Action", "Adventure"],
+        "preferred_country": "Japanese",
+        "boost": 0.1,
+    },
+    {
+        "label": "intrigue",
+        "aliases": [
+            "muu mo", "mưu mô", "am muu", "âm mưu", "intrigue", "scheming",
+            "lua dao", "lừa đảo", "plot twist", "mind game", "deception", "conspiracy"
+        ],
+        "tokens": [
+            "psychological", "thriller", "crime", "mystery", "political", "deception", "conspiracy",
+            "revenge", "scam", "plot twist", "mind game", "manipulation", "heist", "fraud",
+            "betray", "mafia", "trum", "trùm", "tham vong", "tham vọng", "âm mưu", "am muu"
+        ],
+        "preferred_genres": ["Thriller", "Crime", "Mystery", "Drama"],
+        "boost": 0.1,
+    },
+    {
+        "label": "psych_horror",
+        "aliases": ["kinh di tam ly", "kinh dị tâm lý", "psychological horror"],
+        "tokens": [
+            "psychological horror", "horror", "thriller", "mind", "fear", "obsession",
+            "haunting", "serial killer", "split personality"
+        ],
+        "preferred_genres": ["Horror", "Thriller", "Mystery"],
+        "boost": 0.1,
+    },
+    {
+        "label": "psychological",
+        "aliases": ["tam ly", "tâm lý", "psychological", "mental", "mind"],
+        "tokens": ["psychological", "mental", "mind", "identity", "memory", "obsession", "trauma"],
+        "preferred_genres": ["Thriller", "Drama", "Mystery"],
+        "boost": 0.08,
+    },
+    {
+        "label": "oscar",
+        "aliases": ["oscar", "giai oscar", "giải oscar", "academy award", "doat giai", "đoạt giải"],
+        "tokens": [
+            "oscar", "academy award", "award winning", "best picture", "giải thưởng", "doạt giải",
+            "drama", "biography", "historical"
+        ],
+        "preferred_genres": ["Drama", "Documentary"],
+        "boost": 0.09,
+    },
+    {
+        "label": "magic",
+        "aliases": ["phep thuat", "phép thuật", "magic", "wizard", "fantasy", "supernatural"],
+        "tokens": [
+            "magic", "wizard", "witch", "spell", "fantasy", "supernatural", "phap su", "pháp sư",
+            "phep thuat", "phép thuật"
+        ],
+        "preferred_genres": ["Adventure", "Animation", "Science Fiction"],
+        "boost": 0.09,
+    },
+    {
+        "label": "anime",
+        "aliases": ["anime", "hoat hinh nhat", "hoạt hình nhật", "nhat hoat hinh", "nhật hoạt hình", "japanese animation"],
+        "tokens": ["anime", "japanese animation", "animation", "japan", "japanese"],
+        "preferred_genres": ["Animation", "Action", "Adventure"],
+        "preferred_country": "Japanese",
+        "boost": 0.09,
+    },
+    {
+        "label": "sad",
+        "aliases": ["buon", "buồn", "sad", "melancholy", "heartbreak"],
+        "tokens": ["sad", "loss", "grief", "heartbreak", "melancholy", "tragic"],
+        "preferred_genres": ["Drama", "Romance"],
+        "boost": 0.07,
+    },
+]
+
+SIMILAR_REFERENCE_PATTERNS = [
+    r"\b(?:giong|giống|tuong tu|tương tự|nhu|như|same as|like)\s+(?:phim\s+)?(.+)$",
+]
+
+
 
 
 def strip_accents(value: Any) -> str:
@@ -182,6 +268,111 @@ def _contains_any(text: str, values: list[str]) -> bool:
 
 def _safe_top_n(top_n: int) -> int:
     return max(1, min(int(top_n or 10), 50))
+
+
+def extract_reference_title(*values: Any) -> str | None:
+    for value in values:
+        normalized_value = strip_accents(value)
+        if not normalized_value:
+            continue
+
+        for pattern in SIMILAR_REFERENCE_PATTERNS:
+            match = re.search(pattern, normalized_value)
+            if not match or not match.group(1):
+                continue
+
+            reference_text = re.sub(r"\b(?:toi|moi|vua|dang|da|xem|muon|co|the|giai)\b", " ", match.group(1))
+            reference_text = re.sub(r"\s+", " ", reference_text).strip()
+            if reference_text:
+                return reference_text
+
+    return None
+
+
+def build_movie_search_blob(movie: dict[str, Any]) -> str:
+    values = [
+        movie.get("title"),
+        movie.get("original_title"),
+        movie.get("overview"),
+        movie.get("description"),
+        movie.get("feature_text"),
+        " ".join(_list(movie.get("genres"))),
+        " ".join(_list(movie.get("keywords"))),
+        " ".join(_list(movie.get("cast_names"))),
+        movie.get("director"),
+        " ".join(_list(movie.get("countries")) or _list(movie.get("country"))),
+        movie.get("original_language") or movie.get("language"),
+    ]
+    return strip_accents(" ".join(_text(value) for value in values if value))
+
+
+def match_query_theme_rules(original_query: str, normalized_query: str, reference_title: str | None = None) -> list[dict[str, Any]]:
+    combined = strip_accents(" ".join(filter(None, [_text(original_query), _text(normalized_query), _text(reference_title)])))
+    matches: list[dict[str, Any]] = []
+    for rule in QUERY_THEME_RULES:
+        if _contains_any(combined, rule.get("aliases", [])):
+            matches.append(rule)
+    return matches
+
+
+def collect_query_expansion_terms(
+    matched_rules: list[dict[str, Any]],
+    reference_movie: dict[str, Any] | None = None,
+    reference_title: str | None = None,
+) -> list[str]:
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(values: list[Any]) -> None:
+        for value in values:
+            text_value = _text(value)
+            normalized_value = strip_accents(text_value)
+            if not normalized_value or normalized_value in seen:
+                continue
+            seen.add(normalized_value)
+            terms.append(text_value)
+
+    for rule in matched_rules:
+        add(rule.get("tokens", []))
+        add(rule.get("preferred_genres", []))
+        preferred_country = rule.get("preferred_country")
+        if preferred_country:
+            config = COUNTRY_LANGUAGE_ALIASES.get(preferred_country, {})
+            add(config.get("countries", []))
+            add(config.get("languages", []))
+
+    if reference_movie:
+        add(_list(reference_movie.get("genres")))
+        add(_list(reference_movie.get("keywords"))[:10])
+        add([
+            reference_movie.get("country"),
+            reference_movie.get("original_language") or reference_movie.get("language"),
+        ])
+    elif reference_title:
+        add([reference_title])
+
+    return terms
+
+
+def _metadata_records(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, dict)]
+
+    if hasattr(value, "to_dict"):
+        try:
+            records = value.to_dict(orient="records")
+            if isinstance(records, list):
+                return [row for row in records if isinstance(row, dict)]
+        except TypeError:
+            pass
+
+    if isinstance(value, dict):
+        return [value]
+
+    return []
 
 
 def normalize_vi_query(user_text: str) -> str:
@@ -331,9 +522,9 @@ class DatabaseMatcher:
             rows = []
             for table_name in ["movies", "available_movies"]:
                 try:
-                    rows.extend(fetch_table_rows(table_name))
-                    if rows:
-                        break
+                    table_rows = fetch_table_rows(table_name)
+                    if table_rows:
+                        rows.extend(table_rows)
                 except Exception as table_exc:
                     print(f"[recommender] Could not load {table_name}: {table_exc}")
 
@@ -391,14 +582,12 @@ class DatabaseMatcher:
                 or row.get("object_key")
                 or active_source_count.get(movie_id, 0) > 0
             )
-            if not has_play_source:
-                continue
 
             normalized_row = {
                 **row,
                 "id": movie_id or row.get("id"),
                 "movie_id": movie_id or row.get("movie_id"),
-                "has_play_source": True,
+                "has_play_source": has_play_source,
                 "is_premium": row.get("is_premium") or content_control.get("is_premium"),
             }
 
@@ -437,30 +626,30 @@ class RecommendEngine:
 
         self.vectorizer = joblib.load(VECTORIZER_PATH)
         self.movie_vectors = joblib.load(VECTORS_PATH)
-        self.metadata = joblib.load(METADATA_PATH)
-        return True
+        self.metadata = _metadata_records(joblib.load(METADATA_PATH))
+        return bool(self.metadata)
 
     def reload_model(self) -> int:
         if not self.load_model():
             raise RuntimeError(
-                "Kaggle model not found. Run `python prepare_kaggle_data.py` then `python train_kaggle_model.py`."
+                "AI model not found. Run `python ai/models/train_from_csv.py` to rebuild local artifacts."
             )
         self.db_matcher = DatabaseMatcher()
         return len(self.metadata)
 
     def ensure_model(self) -> None:
-        if self.vectorizer is not None and self.movie_vectors is not None and self.metadata:
+        if self.vectorizer is not None and self.movie_vectors is not None and len(self.metadata) > 0:
             return
         self.reload_model()
 
     def health(self) -> dict[str, Any]:
-        model_loaded = self.vectorizer is not None and self.movie_vectors is not None and bool(self.metadata)
+        model_loaded = self.vectorizer is not None and self.movie_vectors is not None and len(self.metadata) > 0
         if not model_loaded:
             model_loaded = self.load_model()
         return {
             "movies_loaded": len(self.metadata),
             "model_loaded": bool(model_loaded),
-            "model_source": "kaggle",
+            "model_source": "local_csv_tfidf",
         }
 
     def _genre_match(self, movie: dict[str, Any], wanted_genres: list[str]) -> str | None:
@@ -477,9 +666,41 @@ class RecommendEngine:
         config = COUNTRY_LANGUAGE_ALIASES.get(wanted_country)
         if not config:
             return False
-        countries = strip_accents(" ".join(_list(movie.get("countries"))))
-        language = strip_accents(movie.get("original_language"))
+        country_values = _list(movie.get("countries")) or _list(movie.get("country"))
+        countries = strip_accents(" ".join(country_values))
+        language = strip_accents(movie.get("original_language") or movie.get("language"))
         return _contains_any(countries, config["countries"]) or language in config["languages"]
+
+    def _find_reference_movie_index(self, reference_text: str | None) -> int | None:
+        normalized_reference = strip_accents(reference_text)
+        if not normalized_reference:
+            return None
+
+        best_index = None
+        best_score = 0.0
+
+        for index, movie in enumerate(self.metadata):
+            title_text = strip_accents(f"{_text(movie.get('title'))} {_text(movie.get('original_title'))}")
+            if not title_text:
+                continue
+
+            score = 0.0
+            if title_text == normalized_reference:
+                score += 5.0
+            if normalized_reference in title_text:
+                score += 4.0
+
+            reference_tokens = [token for token in normalized_reference.split() if len(token) >= 3]
+            shared_tokens = [token for token in reference_tokens if token in title_text]
+            score += len(shared_tokens) * 0.9
+            if reference_tokens and len(shared_tokens) == len(reference_tokens):
+                score += 1.2
+
+            if score > best_score:
+                best_index = index
+                best_score = score
+
+        return best_index if best_score >= 2.0 else None
 
     def _person_match(self, movie: dict[str, Any], query_text: str) -> str | None:
         normalized_query = strip_accents(query_text)
@@ -489,6 +710,22 @@ class RecommendEngine:
             if normalized_person and len(normalized_person.split()) >= 2 and normalized_person in normalized_query:
                 return _text(person)
         return None
+
+    def _keyword_overlap_boost(self, metadata_blob: str, tokens: list[str], cap: float = 0.14) -> tuple[float, list[str]]:
+        boost = 0.0
+        matched_tokens: list[str] = []
+        seen: set[str] = set()
+
+        for token in tokens:
+            normalized_token = strip_accents(token)
+            if not normalized_token or normalized_token in seen:
+                continue
+            seen.add(normalized_token)
+            if _contains_any(metadata_blob, [normalized_token]):
+                matched_tokens.append(normalized_token)
+                boost += 0.03 if len(normalized_token) >= 7 else 0.02
+
+        return min(boost, cap), matched_tokens
 
     def _format_movie(
         self,
@@ -507,9 +744,11 @@ class RecommendEngine:
             "keywords": _list(movie.get("keywords"))[:10],
             "cast_names": _list(movie.get("cast_names")),
             "director": movie.get("director"),
-            "countries": _list(movie.get("countries")),
-            "country": ", ".join(_list(movie.get("countries"))),
-            "original_language": movie.get("original_language"),
+            "countries": _list(movie.get("countries")) or _list(movie.get("country")),
+            "country": ", ".join(_list(movie.get("countries")) or _list(movie.get("country"))),
+            "original_language": movie.get("original_language") or movie.get("language"),
+            "overview": movie.get("overview") or movie.get("description"),
+            "description": movie.get("description") or movie.get("overview"),
             "poster_path": movie.get("poster_path"),
             "vote_average": _number(movie.get("vote_average")),
             "average_rating": _number(movie.get("vote_average")),
@@ -529,7 +768,7 @@ class RecommendEngine:
                     "image_url": db_movie.get("image_url") or db_movie.get("poster_url") or db_movie.get("poster_path"),
                     "source_type": db_movie.get("source_type"),
                     "is_premium": db_movie.get("is_premium"),
-                    "has_play_source": True,
+                    "has_play_source": _bool(db_movie.get("has_play_source")),
                     "source": "database_matched",
                 }
             )
@@ -582,17 +821,31 @@ class RecommendEngine:
 
         normalized_query = normalize_vi_query(query)
         detected = detect_rules(query, normalized_query)
-        query_for_vector = f"{normalized_query} {query}".strip()
+
+        reference_title = extract_reference_title(query, normalized_query)
+        reference_index = self._find_reference_movie_index(reference_title) if reference_title else None
+        reference_movie = self.metadata[reference_index] if reference_index is not None else None
+        matched_theme_rules = match_query_theme_rules(query, normalized_query, reference_title)
+        expansion_terms = collect_query_expansion_terms(matched_theme_rules, reference_movie, reference_title)
+        query_for_vector = " ".join(part for part in [normalized_query, query, " ".join(expansion_terms)] if part).strip()
         query_vector = self.vectorizer.transform([query_for_vector])
         cosine_scores = cosine_similarity(query_vector, self.movie_vectors).flatten()
+
+        reference_scores = None
+        if reference_index is not None:
+            reference_scores = cosine_similarity(self.movie_vectors[reference_index], self.movie_vectors).flatten()
 
         max_popularity = max([_number(movie.get("popularity")) for movie in self.metadata] or [1])
         max_vote_count = max([_number(movie.get("vote_count")) for movie in self.metadata] or [1])
         scored_movies = []
 
         for index, movie in enumerate(self.metadata):
+            if reference_index is not None and index == reference_index:
+                continue
+
             score = float(cosine_scores[index])
             reasons: list[str] = ["semantic similarity"] if score > 0 else []
+            metadata_blob = build_movie_search_blob(movie)
 
             genre_match = self._genre_match(movie, detected.get("genres", []))
             if genre_match:
@@ -608,14 +861,68 @@ class RecommendEngine:
                 score += 0.12
                 reasons.append(f"decade match: {detected['decade']}")
 
-            if self._country_language_match(movie, detected.get("country")):
+            country_match = self._country_language_match(movie, detected.get("country"))
+            if country_match:
                 score += 0.16
                 reasons.append(f"country/language match: {detected['country']}")
+
+            if detected.get("country") == "Korean" and country_match:
+                korean_boost = 0.0
+                if genre_match == "Action" or _contains_any(metadata_blob, ["korean action", "korean thriller", "korean crime", "korean revenge", "korean survival"]):
+                    korean_boost += 0.1
+                if _contains_any(metadata_blob, ["action thriller", "crime action", "revenge action"]):
+                    korean_boost += 0.06
+                if korean_boost > 0:
+                    score += min(korean_boost, 0.16)
+                    reasons.append("korean intent boost")
 
             person_match = self._person_match(movie, normalized_query)
             if person_match:
                 score += 0.18
                 reasons.append(f"actor/director match: {person_match}")
+
+            if reference_scores is not None:
+                reference_similarity = float(reference_scores[index])
+                if reference_similarity > 0:
+                    score += reference_similarity * 0.35
+                    reasons.append(f"similar to {reference_title}")
+
+            for rule in matched_theme_rules:
+                rule_boost = 0.0
+                preferred_genres = rule.get("preferred_genres", [])
+                preferred_country = rule.get("preferred_country")
+
+                if _contains_any(metadata_blob, rule["tokens"]):
+                    rule_boost += float(rule.get("boost", 0.08))
+
+                keyword_boost, _matched_keywords = self._keyword_overlap_boost(
+                    metadata_blob,
+                    rule.get("tokens", []),
+                    cap=max(float(rule.get("boost", 0.08)) * 0.8, 0.08),
+                )
+                rule_boost += keyword_boost
+
+                if rule.get("label") == "intrigue":
+                    precision_boost, _ = self._keyword_overlap_boost(
+                        metadata_blob,
+                        [
+                            "deception", "conspiracy", "betrayal", "manipulation", "mind game",
+                            "plot twist", "political intrigue", "scam", "fraud", "con artist",
+                            "heist", "mafia", "gangster", "investigation", "mystery thriller"
+                        ],
+                        cap=0.12,
+                    )
+                    rule_boost += precision_boost
+
+                if preferred_genres and self._genre_match(movie, preferred_genres):
+                    rule_boost += 0.06
+
+                if preferred_country and self._country_language_match(movie, preferred_country):
+                    rule_boost += 0.06
+
+                if rule_boost > 0:
+                    score += min(rule_boost, 0.28)
+                    reasons.append(f"theme match: {rule['label']}")
 
             popularity = _number(movie.get("popularity"))
             vote_count = _number(movie.get("vote_count"))

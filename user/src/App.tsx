@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Header from './components/layout/Header';
@@ -21,8 +21,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './pages/AdminRoute';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
-import AdminPlans from './pages/AdminPlans';
-import AdminSubscriptions from './pages/AdminSubscriptions';
 import AdminContent from './pages/AdminContent';
 import AdminMoviesPage from './pages/AdminMoviesPage';
 import AdminStats from './pages/AdminStats';
@@ -42,6 +40,7 @@ function UserLayout() {
           <Route path="/watch/id/:id" element={<WatchPage />} />
           <Route path="/watch/:id" element={<WatchPage />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/movies" element={<SearchPage />} />
           <Route path="/genre/:id" element={<GenrePage />} />
           <Route path="/year/:year" element={<YearPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -107,7 +106,7 @@ function App() {
               path="/admin/plans"
               element={
                 <AdminRoute>
-                  <AdminPlans />
+                  <Navigate to="/admin" replace />
                 </AdminRoute>
               }
             />
@@ -115,7 +114,7 @@ function App() {
               path="/admin/subscriptions"
               element={
                 <AdminRoute>
-                  <AdminSubscriptions />
+                  <Navigate to="/admin" replace />
                 </AdminRoute>
               }
             />

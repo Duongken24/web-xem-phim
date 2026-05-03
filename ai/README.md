@@ -1,51 +1,69 @@
-# NiePhim Kaggle AI Recommendation Service
+# WEB-XEM-PHIM AI Pipeline
 
-Service này dùng Kaggle The Movies Dataset để train content-based recommendation bằng TF-IDF + cosine similarity. Không dùng CSV ở frontend và không train lại mỗi lần user search.
+Pipeline AI hiện tại dùng dữ liệu train CSV mới để build model TF-IDF + cosine similarity, sau đó expose qua Python service và để backend Node gọi lại.
 
-## Data
+## Dữ liệu train hiện tại
 
-Đặt các file Kaggle vào `ai/data/`:
+Các file train chính đang nằm trong `ai/data/`:
 
-- `movies_metadata.csv`
-- `keywords.csv`
-- `credits.csv`
-- `links.csv` hoặc `links_small.csv` nếu cần mapping thêm
+- `movies_training.csv`
+- `training_preview.csv`
+- `genres_master.csv`
 
-Pipeline đọc các cột:
+File được dùng để train thật hiện tại là:
 
-- `movies_metadata.csv`: `id`, `title`, `original_title`, `overview`, `genres`, `original_language`, `production_countries`, `release_date`, `runtime`, `popularity`, `vote_average`, `vote_count`, `poster_path`
-- `keywords.csv`: `id`, `keywords`
-- `credits.csv`: `id`, `cast`, `crew`
+- `ai/data/movies_training.csv`
 
-## Prepare Data
+## Lệnh train chuẩn
+
+Từ root project:
+
+```bash
+python3 ai/train_from_csv.py
+```
+
+`ai/train_from_csv.py` là wrapper an toàn, bên dưới sẽ gọi script train thật đang nằm ở:
+
+- `ai/models/train_from_csv.py`
+
+## Lệnh test local chuẩn
+
+Từ root project:
+
+```bash
+python3 ai/test_recommender.py
+```
+
+`ai/test_recommender.py` hiện là file test local chính.
+
+File tên cũ vẫn còn để tương thích ngược:
+
+- `ai/test_recomender.py`
+
+## Model output
+
+Sau khi train, model mới được lưu tại:
+
+- `ai/models/tfidf_vectorizer.joblib`
+- `ai/models/movie_vectors.joblib`
+- `ai/models/movie_metadata.joblib`
+- `ai/models/training_report.json`
+
+## Python runtime service
+
+Runtime Python chính là:
+
+- `ai/ai_service.py`
+
+Service này load engine từ:
+
+- `ai/recommender.py`
+
+Chạy service:
 
 ```bash
 cd ai
-pip install -r requirements.txt
-python prepare_kaggle_data.py
-```
-
-Output:
-
-- `data/processed_movies.parquet`
-- fallback `data/processed_movies.csv` nếu không ghi được parquet
-
-## Train Model
-
-```bash
-python train_kaggle_model.py
-```
-
-Model lưu tại:
-
-- `models/tfidf_vectorizer.joblib`
-- `models/movie_vectors.joblib`
-- `models/movie_metadata.joblib`
-
-## Run Service
-
-```bash
-python ai_service.py
+python3 ai_service.py
 ```
 
 Health check:
@@ -59,24 +77,65 @@ Recommend:
 ```bash
 curl -X POST http://127.0.0.1:8001/recommend \
   -H "Content-Type: application/json" \
-  -d '{"query":"phim tình cảm buồn","top_n":5,"only_database_movies":false}'
+  -d '{"query":"phim hàn hành động","top_n":10}'
 ```
 
-Reload chỉ load lại model joblib đã train, không train lại:
+Reload model đã train:
 
 ```bash
 curl -X POST http://127.0.0.1:8001/reload
 ```
 
-## Gemini
+## Backend route direct-model
 
-`GEMINI_API_KEY` là optional và chỉ đọc ở backend/Python. Nếu không có key, service dùng nguyên câu user nhập.
+Backend Node hiện có route direct-model:
 
-## Database Matching
+- `POST /api/ai/recommend`
 
-Nếu có `SUPABASE_URL` và `SUPABASE_SERVICE_ROLE_KEY`, service sẽ match kết quả Kaggle với bảng `movies`:
+Flow:
 
-1. `movies.tmdb_id = kaggle.tmdb_id` nếu DB có cột `tmdb_id`.
-2. Fallback: `lower(title)` + `release_year`.
+Frontend/Client -> Node backend -> Python AI service -> JSON recommendation
 
-Kết quả match có `source = "database_matched"`. Kết quả chưa match có `source = "kaggle_only"` và chỉ dùng cho demo/tham khảo.
+## Chạy local/dev đầy đủ
+
+Để SearchPage dùng được flow AI mới, cần chạy **2 service riêng**:
+
+### Terminal 1 - Python AI service
+
+```bash
+cd ai
+python3 ai_service.py
+```
+
+Hoặc từ thư mục `backend/`:
+
+```bash
+npm run dev:ai
+```
+
+### Terminal 2 - Node backend
+
+```bash
+cd backend
+npm run dev
+```
+
+### Kiểm tra nhanh health
+
+```bash
+cd backend
+npm run health:ai
+```
+
+Nếu `GET /health` không trả `status: ok`, route `POST /api/ai/recommend` sẽ lỗi vì backend không kết nối được Python AI service.
+
+## Ghi chú về file legacy
+
+Một số file pipeline cũ đã được chuyển sang `ai/legacy/` và `backend/legacy/ai/` để giữ codebase gọn hơn nhưng vẫn có thể rollback khi cần.
+Project vẫn còn một số file pipeline cũ để tham chiếu và rollback, ví dụ:
+
+- `ai/legacy/prepare_kaggle_data.py`
+- `ai/legacy/train_kaggle_model.py`
+- `ai/legacy/train_from_db.py`
+
+Các file này chưa bị xóa trong giai đoạn hiện tại. Chúng sẽ được phân loại/dọn tiếp ở phase sau, không xử lý trong bước chuẩn hóa command này.

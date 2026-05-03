@@ -1,7 +1,9 @@
 import { supabase } from '../lib/supabase';
 import { getApiBaseUrl } from './api';
+import { USE_TMDB } from '../config/featureFlags';
 
 const API_BASE_URL = getApiBaseUrl();
+const AI_REQUEST_TIMEOUT_MS = 6000;
 
 export interface AiRecommendationMovie {
   movie_id: number | null;
@@ -51,7 +53,7 @@ export async function requestAiMovieRecommendations({
 }: RequestAiMovieRecommendationsInput): Promise<AiRecommendationResult> {
   const nextQuery = sanitizeAiQuery(query);
   if (!nextQuery) {
-    throw new Error('Bạn hãy nhập gu phim hoặc tâm trạng muốn xem.');
+    throw new Error('Vui long nhap gu phim hoac tam trang muon xem.');
   }
 
   const {
@@ -63,43 +65,64 @@ export async function requestAiMovieRecommendations({
     headers.set('Authorization', `Bearer ${session.access_token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/ai/movie-recommendations`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      query: nextQuery,
-      top_n: topN,
-      current_movie_id: typeof currentMovieId === 'number' && currentMovieId > 0 ? currentMovieId : null,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
 
-  const responseText = await response.text();
+  let response: Response;
+  let responseText = '';
+
+  try {
+    response = await fetch(`${API_BASE_URL}/api/ai/recommend`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        query: nextQuery,
+        top_n: topN,
+        current_movie_id: typeof currentMovieId === 'number' && currentMovieId > 0 ? currentMovieId : null,
+        only_database_movies: !USE_TMDB,
+      }),
+      signal: controller.signal,
+    });
+
+    responseText = await response.text();
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('AI dang phan hoi cham. Vui long thu lai sau.');
+    }
+
+    throw new Error('Khong the ket noi toi goi y AI luc nay.');
+  } finally {
+    clearTimeout(timeout);
+  }
+
   let payload: any = {};
 
   try {
     payload = responseText ? JSON.parse(responseText) : {};
   } catch {
     if (response.status === 404) {
-      throw new Error('Backend chưa nhận API gợi ý phim. Hãy restart backend rồi thử lại.');
+      throw new Error('Backend chua san sang cho API goi y phim.');
     }
 
-    throw new Error('Backend trả về dữ liệu không hợp lệ. Hãy kiểm tra terminal backend.');
+    throw new Error('Backend tra ve du lieu AI khong hop le.');
   }
 
   if (!response.ok || payload?.success === false) {
-    throw new Error(payload?.error || 'Không thể lấy gợi ý lúc này.');
+    throw new Error(payload?.error || 'AI tam thoi chua san sang.');
   }
 
   const movies = Array.isArray(payload.movies)
     ? payload.movies
     : Array.isArray(payload.items)
       ? payload.items
-      : [];
+      : Array.isArray(payload.recommended_movies)
+        ? payload.recommended_movies
+        : [];
 
   return {
-    source: payload.source || 'chat',
-    warning: payload.warning || '',
-    explanation: payload.explanation || '',
+    source: payload.source === 'ai_service' ? 'chat' : payload.source || 'chat',
+    warning: typeof payload.warning === 'string' ? payload.warning : '',
+    explanation: typeof payload.explanation === 'string' ? payload.explanation : '',
     normalizedQuery: payload.normalizedQuery || payload.normalized_query || nextQuery,
     currentMovieId:
       typeof payload.current_movie_id === 'number' && payload.current_movie_id > 0

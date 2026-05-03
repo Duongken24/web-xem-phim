@@ -19,6 +19,7 @@ import MovieGrid from '../components/movie/MovieGrid';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import SectionTitle from '../components/ui/SectionTitle';
 import type { TMDBMovieDetail } from '../types/tmdb.types';
+import { USE_TMDB } from '../config/featureFlags';
 
 const ratingOptions = Array.from({ length: 10 }, (_, index) => index + 1);
 
@@ -107,11 +108,12 @@ const MovieDetailPage: React.FC = () => {
     movie: tmdbMovie,
     loading: tmdbLoading,
     error: tmdbError,
-  } = useMovieDetails(!isInternalMovieRoute && routeMovieId ? routeMovieId : null);
+  } = useMovieDetails(!isInternalMovieRoute && routeMovieId && USE_TMDB ? routeMovieId : null);
   const { user } = useAuth();
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
 
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistError, setWatchlistError] = useState('');
   const [internalInWatchlist, setInternalInWatchlist] = useState(false);
   const [catalogMovie, setCatalogMovie] = useState<CatalogMovie | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -124,10 +126,12 @@ const MovieDetailPage: React.FC = () => {
   const [ratingMessage, setRatingMessage] = useState('');
   const [ratingError, setRatingError] = useState('');
 
-  const movie = isInternalMovieRoute && catalogMovie ? catalogToMovieDetail(catalogMovie) : tmdbMovie;
-  const loading = isInternalMovieRoute ? sourceLoading : tmdbLoading;
-  const error = isInternalMovieRoute ? catalogError : tmdbError;
-  const inWatchlist = isInternalMovieRoute ? internalInWatchlist : movie ? isInWatchlist(movie.id) : false;
+  const useCatalogResolvedMovie = isInternalMovieRoute || !USE_TMDB;
+  const movie = useCatalogResolvedMovie ? (catalogMovie ? catalogToMovieDetail(catalogMovie) : tmdbMovie) : tmdbMovie;
+  const loading = useCatalogResolvedMovie ? sourceLoading : tmdbLoading;
+  const error = useCatalogResolvedMovie ? catalogError : tmdbError;
+  const preferInternalWatchlistState = isInternalMovieRoute || !USE_TMDB;
+  const inWatchlist = preferInternalWatchlistState ? internalInWatchlist : movie ? isInWatchlist(movie.id) : false;
 
   useEffect(() => {
     let isMounted = true;
@@ -190,7 +194,7 @@ const MovieDetailPage: React.FC = () => {
     let isMounted = true;
 
     const loadInternalWatchlist = async () => {
-      if (!isInternalMovieRoute || !user?.id || !catalogMovie?.id) {
+      if (!(user?.id && catalogMovie?.id && (isInternalMovieRoute || !USE_TMDB))) {
         if (isMounted) setInternalInWatchlist(false);
         return;
       }
@@ -320,34 +324,74 @@ const MovieDetailPage: React.FC = () => {
   };
 
   const handleAddToWatchlist = async () => {
-    if (!user?.id || !movie) return;
+    setWatchlistError('');
+
+    if (!user?.id) {
+      setWatchlistError('Vui lòng đăng nhập để lưu phim vào danh sách.');
+      navigate('/login', { state: { from: location } });
+      return;
+    }
+
+    if (!movie) {
+      setWatchlistError('Không tìm thấy dữ liệu phim để lưu.');
+      return;
+    }
 
     setWatchlistLoading(true);
     try {
-      if (isInternalMovieRoute && catalogMovie?.id) {
+      if (catalogMovie?.id && (isInternalMovieRoute || !USE_TMDB)) {
         const result = await SupabaseService.addToWatchlist(user.id, catalogMovie.id);
-        if (result.success) setInternalInWatchlist(true);
+        if (!result.success) {
+          throw new Error(result.error || 'Không thể thêm phim vào danh sách.');
+        }
+
+        setInternalInWatchlist(true);
         return;
       }
 
-      await addToWatchlist(movie);
+      const result = await addToWatchlist(movie);
+      if (!result.success) {
+        throw new Error(result.error || 'Không thể thêm phim vào danh sách.');
+      }
+    } catch (error) {
+      setWatchlistError(error instanceof Error ? error.message : 'Không thể thêm phim vào danh sách.');
     } finally {
       setWatchlistLoading(false);
     }
   };
 
   const handleRemoveFromWatchlist = async () => {
-    if (!user?.id || !movie) return;
+    setWatchlistError('');
+
+    if (!user?.id) {
+      setWatchlistError('Vui lòng đăng nhập để cập nhật danh sách.');
+      navigate('/login', { state: { from: location } });
+      return;
+    }
+
+    if (!movie) {
+      setWatchlistError('Không tìm thấy dữ liệu phim để cập nhật.');
+      return;
+    }
 
     setWatchlistLoading(true);
     try {
-      if (isInternalMovieRoute && catalogMovie?.id) {
+      if (catalogMovie?.id && (isInternalMovieRoute || !USE_TMDB)) {
         const result = await SupabaseService.removeFromWatchlist(user.id, catalogMovie.id);
-        if (result.success) setInternalInWatchlist(false);
+        if (!result.success) {
+          throw new Error(result.error || 'Không thể xóa phim khỏi danh sách.');
+        }
+
+        setInternalInWatchlist(false);
         return;
       }
 
-      await removeFromWatchlist(movie);
+      const result = await removeFromWatchlist(movie);
+      if (!result.success) {
+        throw new Error(result.error || 'Không thể xóa phim khỏi danh sách.');
+      }
+    } catch (error) {
+      setWatchlistError(error instanceof Error ? error.message : 'Không thể xóa phim khỏi danh sách.');
     } finally {
       setWatchlistLoading(false);
     }
@@ -572,6 +616,8 @@ const MovieDetailPage: React.FC = () => {
                     </button>
                   )}
                 </div>
+
+                {watchlistError && <p className="text-sm text-red-300">{watchlistError}</p>}
               </div>
             </div>
           </div>

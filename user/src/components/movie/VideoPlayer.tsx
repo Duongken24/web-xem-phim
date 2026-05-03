@@ -10,6 +10,7 @@ interface VideoPlayerProps {
   onProgress?: (progress: { played: number; playedSeconds: number }) => void;
   onEnded?: () => void;
   onPause?: (state: { played: number; playedSeconds: number; duration: number }) => void;
+  onBeforeUnmount?: (state: { played: number; playedSeconds: number; duration: number }) => void;
   onDuration?: (duration: number) => void;
   initialProgress?: number;
   autoPlay?: boolean;
@@ -100,6 +101,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onProgress,
   onEnded,
   onPause,
+  onBeforeUnmount,
   onDuration,
   initialProgress = 0,
   autoPlay = false,
@@ -109,7 +111,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const pendingSeekRatioRef = useRef<number>(initialProgress);
   const suppressPauseRef = useRef(true);
   const autoPlayRef = useRef(autoPlay);
-  const callbacksRef = useRef({ onProgress, onEnded, onPause, onDuration });
+  const callbacksRef = useRef({ onProgress, onEnded, onPause, onBeforeUnmount, onDuration });
   const [playerError, setPlayerError] = useState<string | null>(null);
 
   const sourceType = useMemo(() => mimeType || inferSourceType(url), [mimeType, url]);
@@ -123,8 +125,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [autoPlay]);
 
   useEffect(() => {
-    callbacksRef.current = { onProgress, onEnded, onPause, onDuration };
-  }, [onProgress, onEnded, onPause, onDuration]);
+    callbacksRef.current = { onProgress, onEnded, onPause, onBeforeUnmount, onDuration };
+  }, [onBeforeUnmount, onDuration, onEnded, onPause, onProgress]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -168,6 +170,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const controlBar = player.getChild('controlBar');
     controlBar?.addChild('SeekBackward10Button', {}, 1);
     controlBar?.addChild('SeekForward10Button', {}, 3);
+
+    const getPlaybackState = () => {
+      const duration = player.duration() ?? 0;
+      const playedSeconds = player.currentTime() ?? 0;
+
+      return {
+        played: Number.isFinite(duration) && duration > 0 ? playedSeconds / duration : 0,
+        playedSeconds: Number.isFinite(playedSeconds) ? playedSeconds : 0,
+        duration: Number.isFinite(duration) ? duration : 0,
+      };
+    };
 
     const playToggle = controlBar?.getChild('playToggle') as any;
     playToggle?.controlText('Phát');
@@ -220,13 +233,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       playToggle?.controlText('Phát');
 
-      const duration = player.duration() ?? 0;
-      const playedSeconds = player.currentTime() ?? 0;
-      callbacksRef.current.onPause?.({
-        played: Number.isFinite(duration) && duration > 0 ? playedSeconds / duration : 0,
-        playedSeconds,
-        duration: Number.isFinite(duration) ? duration : 0,
-      });
+      callbacksRef.current.onPause?.(getPlaybackState());
     });
     player.on('ended', () => {
       callbacksRef.current.onEnded?.();
@@ -242,6 +249,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     return () => {
       if (!player.isDisposed()) {
+        callbacksRef.current.onBeforeUnmount?.(getPlaybackState());
         player.dispose();
       }
       playerRef.current = null;
