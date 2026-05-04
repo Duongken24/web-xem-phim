@@ -67,9 +67,14 @@ app.use(cors({
       "http://127.0.0.1:5173",
       "http://127.0.0.1:5174",
       "http://192.168.1.221:5173",
+      "https://web-xem-phim-aoo8yx9p0-tinduongai-3911s-projects.vercel.app",
     ];
 
-    if (allowedOrigins.includes(origin) || /^http:\/\/192\.168\.\d+\.\d+:517\d$/.test(origin)) {
+    if (
+      allowedOrigins.includes(origin) ||
+      /^http:\/\/192\.168\.\d+\.\d+:517\d$/.test(origin) ||
+      /^https:\/\/web-xem-phim(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin)
+    ) {
       return callback(null, true);
     }
 
