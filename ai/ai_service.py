@@ -24,7 +24,9 @@ def is_model_loaded() -> bool:
     return engine.vectorizer is not None and engine.movie_vectors is not None and len(engine.metadata) > 0
 
 
+@app.get("/")
 @app.get("/health")
+@app.get("/healthz")
 def health() -> dict[str, Any]:
     return {
         "status": "ok",
@@ -73,4 +75,4 @@ def recommend(payload: RecommendRequest) -> dict[str, Any]:
 if __name__ == "__main__":
     host = os.getenv("AI_HOST", "127.0.0.1")
     port = int(os.getenv("AI_PORT", "8001"))
-    uvicorn.run("ai_service:app", host=host, port=port, reload=False)
+    uvicorn.run(app, host=host, port=port, reload=False)
