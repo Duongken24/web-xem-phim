@@ -259,7 +259,15 @@ export function useAuthState(): AuthContextType {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setSession(null);
+      setUser(null);
+      setRole(null);
+      setIsBlocked(false);
+      setLoading(false);
+    }
   };
 
   return {
