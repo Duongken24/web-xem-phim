@@ -9,7 +9,7 @@ from db_loader import save_ai_history, save_ai_recommendations
 from recommender import RecommendEngine
 
 
-app = FastAPI(title="Thèm PHim AI Recommendation Service")
+app = FastAPI(title="Them Phim AI Recommendation Service")
 engine = RecommendEngine()
 
 
@@ -20,12 +20,17 @@ class RecommendRequest(BaseModel):
     user_id: str | None = None
 
 
+def is_model_loaded() -> bool:
+    return engine.vectorizer is not None and engine.movie_vectors is not None and len(engine.metadata) > 0
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
-    model_state = engine.health()
     return {
         "status": "ok",
-        **model_state,
+        "model_loaded": is_model_loaded(),
+        "model_source": "local_csv_tfidf",
+        "movies_loaded": len(engine.metadata),
     }
 
 
